@@ -1,0 +1,19 @@
+{
+  "all": true,
+  "include": [
+    "src/ai/**/*.ts",
+    "src/conversation/**/*.ts",
+    "src/navigation/**/*.ts",
+    "src/services/**/*.ts",
+    "src/types/schemas.ts",
+    "src/utils/**/*.ts",
+    "src/app/api/**/*.ts"
+  ],
+  "exclude": ["src/ai/AIProvider.ts"],
+  "reporter": ["text", "html", "lcov", "json-summary", "json"],
+  "check-coverage": true,
+  "lines": 95,
+  "statements": 95,
+  "functions": 95,
+  "branches": 90
+}

@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUpRight, GitCompareArrows, LoaderCircle, MapPin, X } from "lucide-react";
+import { ArrowUpRight, GitCompareArrows, LoaderCircle, MapPin, RotateCw, X } from "lucide-react";
 import type { DetourResult, PlaceCategory, PlaceResult } from "@/types/domain";
 import type { PlaceSearch } from "@/conversation/ConversationEngine";
 import { categories, categoryLabel } from "@/utils/categories";
@@ -10,6 +10,7 @@ import { CategoryIcon } from "@/components/common/CategoryIcon";
 type Props = {
   category: PlaceCategory; scope: "nearby" | "route"; search: PlaceSearch | null; selected: PlaceResult | null;
   detours: DetourResult[]; busy: boolean; hasRoute: boolean; error: string;
+  unavailable?: string;
   onCategory: (category: PlaceCategory) => void; onScope: (scope: "nearby" | "route") => void;
   onSearch: () => void; onSelect: (place: PlaceResult | null) => void; onNavigate: (place: PlaceResult) => void; onCompare: () => void;
 };
@@ -23,16 +24,17 @@ export function PlaceResults(props: Props) {
   return <section className="places-panel" aria-labelledby="places-heading">
     <div className="section-heading compact"><div><span className="eyebrow">EXPLORE</span><h2 id="places-heading">Places on your way</h2></div><MapPin size={20} className="muted-icon" /></div>
     <div className="segmented" aria-label="Place search area">
-      <button aria-pressed={props.scope === "nearby"} onClick={() => props.onScope("nearby")} disabled={props.busy}>Nearby</button>
-      <button aria-pressed={props.scope === "route"} onClick={() => props.onScope("route")} disabled={props.busy || !props.hasRoute}>Along route</button>
+      <button aria-pressed={props.scope === "nearby"} onClick={() => props.onScope("nearby")} disabled={props.busy || !!props.unavailable}>Nearby</button>
+      <button aria-pressed={props.scope === "route"} onClick={() => props.onScope("route")} disabled={props.busy || !!props.unavailable || !props.hasRoute}>Along route</button>
     </div>
     <div className="category-grid" aria-label="Place category">
-      {categories.map((category) => <button key={category.value} title={category.label} aria-pressed={props.category === category.value} onClick={() => props.onCategory(category.value)} disabled={props.busy}><CategoryIcon category={category.value} /><span>{category.label}</span></button>)}
+      {categories.map((category) => <button key={category.value} title={category.label} aria-pressed={props.category === category.value} onClick={() => props.onCategory(category.value)} disabled={props.busy || !!props.unavailable}><CategoryIcon category={category.value} /><span>{category.label}</span></button>)}
     </div>
-    <button className="secondary-button full-width" onClick={props.onSearch} disabled={props.busy}>{props.busy ? <LoaderCircle size={16} className="spin" /> : <MapPin size={16} />}Find {categoryLabel(props.category).toLowerCase()}</button>
-    {props.error && <p className="field-error" role="alert">{props.error}</p>}
+    {props.unavailable && <div role="status"><strong>Places temporarily unavailable</strong><p className="field-error">{props.unavailable}</p>{props.search && <p className="data-note">Previous results are shown below.</p>}</div>}
+    <button className="secondary-button full-width" onClick={props.onSearch} disabled={props.busy}>{props.busy ? <LoaderCircle size={16} className="spin" /> : props.unavailable ? <RotateCw size={16} /> : <MapPin size={16} />}{props.unavailable ? "Retry place service" : `Find ${categoryLabel(props.category).toLowerCase()}`}</button>
+    {props.error && !props.unavailable && <p className="field-error" role="alert">{props.error}</p>}
     {props.search && <div className="results-heading"><span>{props.search.places.length} results · {props.search.scope === "route" ? "along route" : "near origin"}</span><button className="icon-button" onClick={props.onCompare} disabled={props.busy || !props.hasRoute || !props.search.places.length} title="Compare real driving detours for the first 3 results" aria-label="Compare driving detours"><GitCompareArrows size={17} /></button></div>}
-    {!props.search ? <div className="places-empty"><MapPin size={25} /><p>Nearby places</p><span>No search results yet</span></div> : props.search.places.length === 0 ? <p className="empty-message">No matching places returned in this area.</p> : <ol className="place-list">
+    {!props.search ? !props.unavailable && <div className="places-empty"><MapPin size={25} /><p>Nearby places</p><span>No search results yet</span></div> : props.search.places.length === 0 ? <p className="empty-message">No matching places returned in this area.</p> : <ol className="place-list">
       {props.search.places.map((place, index) => {
         const detour = props.detours.find((item) => item.placeId === place.id);
         return <li key={place.id} className={props.selected?.id === place.id ? "selected" : ""}>

@@ -1,15 +1,14 @@
 import type { ConversationContext, DetourResult, Location, PlaceCategory, PlaceResult, RouteResult } from "@/types/domain";
 import { NavigationController } from "@/navigation/NavigationController";
 import { IntentProcessor } from "@/ai/IntentProcessor";
-import { requestRoute, requestRouteAlternatives, searchLocations, searchPlaces } from "@/services/client";
 import { categoryLabel } from "@/utils/categories";
 import { distanceBetween, formatDistance, formatDuration } from "@/utils/geo";
 import { currentLocationReference, destinationInstruction, lastOptionIndex, normalizeLanguage, routeInstruction } from "@/navigation/commands";
-import { requestCurrentLocation } from "@/services/geolocation";
 import { HINDI_VOICE_SEND_PHRASE, VOICE_SEND_PHRASE, voiceRequest } from "@/services/voice/browserVoice";
 import { locationSchema } from "@/types/schemas";
 import { detectLanguage, hindiConfirmation, type AssistantLanguage } from "@/ai/language";
-import { addMessage, emptyContext } from "./ConversationContext";
+import { addMessage, clearPendingNavigation, emptyContext } from "./ConversationContext";
+import { defaultConversationServices, type ConversationServices } from "./ConversationServices";
 
 export type PlaceSearch = { category: PlaceCategory; scope: "nearby" | "route"; places: PlaceResult[] };
 type Callbacks = {
@@ -28,7 +27,11 @@ export class ConversationEngine {
   private busy = false;
   private readonly processor = new IntentProcessor();
 
-  constructor(private readonly navigation: NavigationController, private readonly callbacks: Callbacks) {
+  constructor(
+    private readonly navigation: NavigationController,
+    private readonly callbacks: Callbacks,
+    private readonly services: ConversationServices = defaultConversationServices,
+  ) {
     navigation.subscribe(() => this.resetNavigationContext());
   }
 
@@ -59,10 +62,10 @@ export class ConversationEngine {
   private say(english: string, hindi: string): string { return this.context.language === "hi" ? hindi : english; }
   private duration(seconds: number): string { return this.context.language === "hi" ? formatDuration(seconds).replace(/hr/g, "घंटे").replace(/min/g, "मिनट") : formatDuration(seconds); }
   private distance(meters: number): string { return this.context.language === "hi" ? formatDistance(meters).replace(/km/g, "किलोमीटर").replace(/m/g, "मीटर") : formatDistance(meters); }
-  private clearPending() { this.update({ ...this.context, pendingDestination: null, pendingOrigin: null, pendingLocationChoices: [], pendingSourceText: null, pendingRevision: null }); }
+  private clearPending() { this.update(clearPendingNavigation(this.context)); }
 
   resetNavigationContext(): void {
-    this.update({ ...this.context, recentPlaces: [], selectedPlaceId: null, lastSearchScope: null, pendingDestination: null, pendingOrigin: null, pendingLocationChoices: [], pendingSourceText: null, pendingRevision: null });
+    this.update(clearPendingNavigation({ ...this.context, recentPlaces: [], selectedPlaceId: null, lastSearchScope: null }));
   }
 
   selectPlace(place: PlaceResult | null): void {
@@ -77,9 +80,9 @@ export class ConversationEngine {
     const reference = session.origin ?? this.callbacks.getReferenceLocation();
     if (!reference) throw new Error("Set an origin or allow location access before searching for places.");
     if (scope === "route" && !session.route) throw new Error("Calculate a route before searching along it.");
-    const places = await searchPlaces(category, reference, scope, session.route?.geometry);
+    const places = await this.services.searchPlaces(category, reference, scope, session.route?.geometry);
     if (this.navigation.getSnapshot().revision !== session.revision) throw new Error("Your route changed during the search. Please search again.");
-    this.update({ ...this.context, recentPlaces: places, selectedPlaceId: null, lastSearchScope: scope, pendingDestination: null, pendingOrigin: null, pendingLocationChoices: [], pendingSourceText: null, pendingRevision: null });
+    this.update(clearPendingNavigation({ ...this.context, recentPlaces: places, selectedPlaceId: null, lastSearchScope: scope }));
     this.callbacks.onPlaces({ category, scope, places });
     return places;
   }
@@ -96,7 +99,7 @@ export class ConversationEngine {
     const failures: string[] = [];
     for (const place of places) {
       try {
-        const route = await requestRoute([session.origin, place, session.destination]);
+        const route = await this.services.requestRoute([session.origin, place, session.destination]);
         results.push({ placeId: place.id, extraDistanceMeters: route.distanceMeters - session.route.distanceMeters, extraDurationSeconds: route.durationSeconds - session.route.durationSeconds, totalDistanceMeters: route.distanceMeters, totalDurationSeconds: route.durationSeconds });
       } catch { failures.push(place.name); }
     }
@@ -114,7 +117,7 @@ export class ConversationEngine {
   private async checkOtherRoutes(): Promise<string> {
     const session = this.navigation.getSnapshot();
     if (!session.origin || !session.destination || !session.route) return this.say("Which journey should I check? Select an origin and destination and calculate a route first, then I can request other driving routes between them.", "दूसरे रास्ते देखने के लिए पहले शुरुआती जगह और मंज़िल बताकर रास्ता बनाइए।");
-    const routes = await requestRouteAlternatives([session.origin, session.destination]);
+    const routes = await this.services.requestRouteAlternatives([session.origin, session.destination]);
     if (this.navigation.getSnapshot().revision !== session.revision) throw new Error("Your journey changed while checking other routes. Please ask again.");
     const seen = new Set([JSON.stringify(session.route.geometry.coordinates)]);
     const alternatives = routes.filter((route) => {
@@ -161,14 +164,14 @@ export class ConversationEngine {
   private async planRoute(originQuery: string, query: string, sourceText: string, revision: number): Promise<string> {
     let origin: Location;
     if (currentLocationReference(originQuery)) {
-      origin = locationSchema.parse(await (this.callbacks.getCurrentLocation?.() ?? requestCurrentLocation()));
+      origin = locationSchema.parse(await (this.callbacks.getCurrentLocation?.() ?? this.services.requestCurrentLocation()));
       this.callbacks.onCurrentLocation?.(origin);
     } else {
-      const origins = await searchLocations(originQuery);
+      const origins = await this.services.searchLocations(originQuery);
       if (origins.length !== 1) return origins.length ? "That starting location has multiple matches. Repeat the route request with a more specific starting address and destination." : "I could not find that starting location. Give a more specific starting address and destination.";
       origin = origins[0];
     }
-    return this.resolveDestinations(await searchLocations(query, origin), sourceText, revision, origin);
+    return this.resolveDestinations(await this.services.searchLocations(query, origin), sourceText, revision, origin);
   }
 
   private selectLocation(index: number): void {
@@ -271,7 +274,7 @@ export class ConversationEngine {
           if (!session.origin && intent.query && intent.reference === undefined && !intent.category) {
             const startingLocation = this.callbacks.getReferenceLocation();
             response = startingLocation
-              ? this.resolveDestinations(await searchLocations(intent.query, startingLocation), clean, session.revision, startingLocation)
+              ? this.resolveDestinations(await this.services.searchLocations(intent.query, startingLocation), clean, session.revision, startingLocation)
               : await this.planRoute("current location", intent.query, clean, session.revision);
             break;
           }
@@ -294,7 +297,7 @@ export class ConversationEngine {
             if (matches.length === 1) selected = matches[0];
             else if (matches.length > 1) { response = "Several results have that name. Specify the result number."; break; }
             else {
-              const locations = await searchLocations(query, session.origin);
+              const locations = await this.services.searchLocations(query, session.origin);
               response = this.resolveDestinations(locations, clean, session.revision, null);
               break;
             }

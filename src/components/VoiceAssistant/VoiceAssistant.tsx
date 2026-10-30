@@ -47,14 +47,6 @@ export function VoiceAssistant({ engine, blocked, onBusyChange }: { engine: Conv
     : status === "idle" && input.trim() ? "Draft ready" : status.charAt(0).toUpperCase() + status.slice(1);
 
   useEffect(() => {
-    resumeListening.current = (followup = true) => listen(followup);
-    resumeSubmission.current = (text) => { void submit(text, true); };
-    if (!blocked && !requestActive.current && interruptionEnabled.current && panelOpen.current && !document.hidden && queuedVoiceRequests.current.length) {
-      const queued = queuedVoiceRequests.current.shift();
-      if (queued) void submit(queued, true);
-    }
-  });
-  useEffect(() => {
     panelOpen.current = true;
     return () => {
       panelOpen.current = false;
@@ -308,6 +300,15 @@ export function VoiceAssistant({ engine, blocked, onBusyChange }: { engine: Conv
     if (!replyActive.current && !requestActive.current) { setState(abortListening.current ? "listening" : "idle"); onBusyChange(Boolean(abortListening.current)); }
     pendingPlayback.current?.();
   }
+
+  useEffect(() => {
+    resumeListening.current = (followup = true) => listen(followup);
+    resumeSubmission.current = (text) => { void submit(text, true); };
+    if (!blocked && !requestActive.current && interruptionEnabled.current && panelOpen.current && !document.hidden && queuedVoiceRequests.current.length) {
+      const queued = queuedVoiceRequests.current.shift();
+      if (queued) void submit(queued, true);
+    }
+  });
 
   return <section className={`assistant-panel ${collapsed ? "assistant-collapsed" : ""}`} aria-labelledby="assistant-title">
     <header className="assistant-header"><span className={`assistant-symbol ${state === "listening" ? "listening" : ""}`}><AudioLines size={21} /></span><div><h2 id="assistant-title">VoiceNav assistant</h2><span className={`assistant-status state-${status}`}><i />{statusLabel}</span></div><button className="icon-button" onClick={() => { panelOpen.current = collapsed; if (!collapsed) { voiceConversation.current = false; setContinuousListening(false); if (state === "listening" || state === "responding") stopVoice(); } setCollapsed(!collapsed); }} aria-expanded={!collapsed} aria-label={collapsed ? "Expand assistant" : "Collapse assistant"} title={collapsed ? "Expand assistant" : "Collapse assistant"}>{collapsed ? <ChevronUp size={18} /> : <ChevronDown size={18} />}</button></header>

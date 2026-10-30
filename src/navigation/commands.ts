@@ -37,6 +37,7 @@ function destinationName(text: string): string | null {
     .replace(/[,\s]+(?:please|thanks|thank you)$/i, "").trim();
   if (candidate.length < 3 || candidate.length > 300 || !/\p{L}/u.test(candidate) || !/^[\p{L}\p{M}\p{N}\s,.'’()/#&:+-]+$/u.test(candidate)) return null;
   const normalized = normalizeHindi(candidate);
+  if (/^(?:(?:mujhe|mereko|mereku|mere|meri|mera)\s+)?(?:ghar|kaam)(?:\s+(?:le|leke|lekar)\s+(?:chalo|jao))?$/i.test(normalized)) return null;
   if (hindiNegation(candidate) || lastOptionIndex(candidate) !== undefined || currentLocationReference(candidate)) return null;
   if (/\b(?:any|some|all|check|look|looking|wonder|help|near|closest|quickest|fastest|shortest|detours?|available|availability)\b|\bon (?:my |the |our )?way\b|\ben route\b/i.test(normalized)) return null;
   if (/\s&\s/u.test(candidate) || /\b(?:and|no|not|never|neither|yes|okay|ok|thanks|here|there|it|that|this|somewhere|anywhere|what|which|who|where|when|why|how|can|could|would|should|will|does|do|did|is|are|was|were|tell|explain|know|about|information|details?|opening|hours?|open|closed|address|website|ratings?|compare|versus|vs|traffic|congestion|closures?|eta|arrival|time|distance|nearby|nearest|near me|along|alternatives?|route|routes|options?|results?|confirm|cancel|stop|discard|send|submit|destination|target|home|work|find|search|show|list|kya|kaun|kaunsa|konsa|kahan|kidhar|kab|kyun|kaise|kitna|kitni|kitne|waqt|samay|doori|jaankari|baare|khula|khuli|batao|dikhao|paas|nazdeek|aaspaas|rasta|raste|haan|han|hau|theek)\b/i.test(normalized)) return null;

@@ -360,7 +360,7 @@ export function startMicrophoneInterruption(callbacks: Parameters<typeof startVo
     release();
     callbacks.onError(message);
   };
-  function useBrowserMicrophone() {
+  function startNativeMicrophone() {
     if (cancelled || fallbackStarted) return;
     fallbackStarted = true;
     stop();
@@ -375,7 +375,7 @@ export function startMicrophoneInterruption(callbacks: Parameters<typeof startVo
     if (cancelled) stop();
   }
   if (!navigator.mediaDevices?.getUserMedia) {
-    useBrowserMicrophone();
+    startNativeMicrophone();
   } else {
     const audioConstraints = {
       echoCancellation: { ideal: true },
@@ -408,7 +408,7 @@ export function startMicrophoneInterruption(callbacks: Parameters<typeof startVo
       if (cancelled) { release(); return; }
       const cancellation: unknown = audioTrack?.getSettings().echoCancellation;
       if (cancellation !== "all" && cancellation !== true) {
-        useBrowserMicrophone();
+        startNativeMicrophone();
         return;
       }
       let receivedResult = false;
@@ -421,14 +421,14 @@ export function startMicrophoneInterruption(callbacks: Parameters<typeof startVo
           callbacks.onResult?.();
         },
         onEnd: () => { release(); callbacks.onEnd?.(); },
-        onError: useBrowserMicrophone,
+        onError: startNativeMicrophone,
       });
       if (cancelled || fallbackStarted) { stopTrackRecognition(); return; }
       stop = stopTrackRecognition;
-      if (!receivedResult) captureDeadline = setTimeout(useBrowserMicrophone, 6000);
+      if (!receivedResult) captureDeadline = setTimeout(startNativeMicrophone, 6000);
     }).catch((error: unknown) => {
       if (error instanceof DOMException && ["NotAllowedError", "SecurityError"].includes(error.name)) fail(recognitionMessages.permission);
-      else useBrowserMicrophone();
+      else startNativeMicrophone();
     });
   }
   return () => { cancelled = true; stop(); release(); };

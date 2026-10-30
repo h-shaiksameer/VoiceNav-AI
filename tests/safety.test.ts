@@ -3,7 +3,8 @@ import { test, type TestContext } from "node:test";
 import type { AIProvider } from "@/ai/AIProvider";
 import { IntentProcessor } from "@/ai/IntentProcessor";
 import { ConversationEngine } from "@/conversation/ConversationEngine";
-import { emptyContext } from "@/conversation/ConversationContext";
+import type { ConversationServices } from "@/conversation/ConversationServices";
+import { clearPendingNavigation, emptyContext } from "@/conversation/ConversationContext";
 import { NavigationController } from "@/navigation/NavigationController";
 import { ambiguousReference, destinationInstruction, lastOptionIndex, referenceIndex, routeInstruction } from "@/navigation/commands";
 import { emptySession } from "@/navigation/NavigationSession";
@@ -11,6 +12,10 @@ import type { IntentType, Location, NavigationAction, PlaceResult, RouteResult }
 import { prepareSpokenText, sanitizeVoiceRequest, speakResponse, startMicrophoneInterruption, startRecognition, startVoiceInterruption, voiceInterruptionRequest, voiceRequest } from "@/services/voice/browserVoice";
 import { hindiConfirmation } from "@/ai/language";
 import { locationSchema } from "@/types/schemas";
+import { coordinatesSchema, geometrySchema, intentSchema, navigationActionSchema, placesRequestSchema, routeSchema } from "@/types/schemas";
+import { requestCurrentLocation } from "@/services/geolocation";
+import { categoryLabel, matchingCategories } from "@/utils/categories";
+import { distanceBetween, formatDistance, formatDuration, validCoordinates } from "@/utils/geo";
 
 const origin: Location = { id: "test:origin", name: "Test origin", lat: 51.5, lon: -0.1 };
 const destination: Location = { id: "test:destination", name: "Test destination", lat: 51.51, lon: -0.12 };
@@ -19,6 +24,72 @@ const places: PlaceResult[] = [
   { id: "osm:node:1", name: "Test restaurant A", lat: 51.501, lon: -0.101, category: "restaurant", distanceMeters: 150 },
   { id: "osm:node:2", name: "Test restaurant B", lat: 51.502, lon: -0.102, category: "restaurant", distanceMeters: 300 },
 ];
+
+test("clearing pending navigation is immutable and preserves unrelated conversation state", () => {
+  const context = Object.freeze({ ...emptyContext(), language: "hi" as const, recentPlaces: places, selectedPlaceId: places[0].id, lastSearchScope: "route" as const, pendingDestination: destination, pendingOrigin: origin, pendingLocationChoices: [destination], pendingSourceText: "Navigate to Oxford", pendingRevision: 7 });
+  const cleared = clearPendingNavigation(context);
+  assert.notStrictEqual(cleared, context);
+  assert.equal(context.pendingDestination, destination);
+  assert.equal(cleared.pendingDestination, null);
+  assert.equal(cleared.pendingOrigin, null);
+  assert.equal(cleared.pendingRevision, null);
+  assert.equal(cleared.pendingSourceText, null);
+  assert.deepEqual(cleared.pendingLocationChoices, []);
+  assert.strictEqual(cleared.messages, context.messages);
+  assert.strictEqual(cleared.recentPlaces, places);
+  assert.equal(cleared.selectedPlaceId, places[0].id);
+  assert.equal(cleared.language, "hi");
+  assert.equal(cleared.lastSearchScope, "route");
+});
+
+test("schema boundaries reject invalid coordinates, routes, actions and unexpected intent fields", () => {
+  for (const point of [{ lat: Infinity, lon: 0 }, { lat: 91, lon: 0 }, { lat: 0, lon: -181 }, { lat: NaN, lon: 1 }]) {
+    assert.equal(validCoordinates(point), false);
+    assert.equal(coordinatesSchema.safeParse(point).success, false);
+  }
+  assert.equal(geometrySchema.safeParse({ type: "LineString", coordinates: [[0, 0]] }).success, false);
+  assert.equal(routeSchema.safeParse({ ...fixtureRoute, durationSeconds: -1 }).success, false);
+  assert.equal(intentSchema.safeParse({ type: "GET_ETA", execute: "unsafe" }).success, false);
+  for (const scope of ["nearby", "route"] as const) {
+    assert.equal(placesRequestSchema.safeParse({ category: "fuel", center: origin, scope, ...(scope === "route" ? { geometry: fixtureRoute.geometry } : {}) }).success, true);
+  }
+  assert.equal(placesRequestSchema.safeParse({ category: "fuel", center: origin, scope: "route" }).success, false);
+  for (const action of [
+    { type: "SET_ROUTE", origin, destination },
+    { type: "PLAN_ROUTE", origin, destination, sourceText: "Plan a route from London to Oxford", confirmed: true, allowedIds: [destination.id], expectedRevision: 0 },
+    { type: "CHANGE_DESTINATION", destination, sourceText: "Navigate to Oxford", confirmed: true, allowedIds: [destination.id], expectedRevision: 0 },
+    { type: "STOP_NAVIGATION", sourceText: "Stop navigation" },
+  ]) assert.equal(navigationActionSchema.safeParse(action).success, true);
+  assert.equal(navigationActionSchema.safeParse({ type: "STOP_NAVIGATION", sourceText: "Stop navigation", code: "unsafe" }).success, false);
+  assert.equal(formatDistance(99.5), "100 m");
+  assert.equal(formatDistance(1500), "1.5 km");
+  assert.equal(formatDuration(0), "1 min");
+  assert.equal(formatDuration(3660), "1 hr 1 min");
+  assert.equal(distanceBetween(origin, origin), 0);
+  assert.equal(categoryLabel("cafe"), "Cafes");
+  assert.equal(categoryLabel("unknown" as PlaceResult["category"]), "unknown");
+  assert.equal(matchingCategories("coffee and pharmacy").length, 2);
+});
+
+test("geolocation covers success, unsupported, denied, timeout, unavailable and invalid device coordinates", async (context) => {
+  mockBrowser(context, { navigator: {} });
+  await assert.rejects(requestCurrentLocation(), /not supported/);
+  Reflect.deleteProperty(globalThis, "navigator");
+  await assert.rejects(requestCurrentLocation(), /not supported/);
+  for (const code of [1, 2, 3]) {
+    Object.defineProperty(globalThis, "navigator", { configurable: true, value: { geolocation: { getCurrentPosition: (_success: unknown, failure: (error: { code: number }) => void) => failure({ code }) } } });
+    await assert.rejects(requestCurrentLocation(), code === 1 ? /denied/ : code === 3 ? /timed out/ : /unavailable/);
+  }
+  for (const latitude of [17, 1000]) {
+    Object.defineProperty(globalThis, "navigator", { configurable: true, value: { geolocation: { getCurrentPosition: (success: (position: { coords: { latitude: number; longitude: number } }) => void, _failure: unknown, options: PositionOptions) => {
+      assert.equal(options.enableHighAccuracy, true);
+      assert.equal(options.timeout, 12000);
+      success({ coords: { latitude, longitude: 78 } });
+    } } } });
+    if (latitude === 17) assert.equal((await requestCurrentLocation()).id, "device:current");
+    else await assert.rejects(requestCurrentLocation(), /invalid location/);
+  }
+});
 
 for (const [text, expected] of [
   ["option one option one option two", 1],
@@ -323,6 +394,239 @@ function engineFixture(navigation: NavigationController) {
   return new ConversationEngine(navigation, { onPlaces: () => {}, onSelectPlace: () => {}, onDetours: () => {}, getReferenceLocation: () => origin });
 }
 
+test("conversation service adapters are substitutable without changing confirmation or controller ownership", async (context) => {
+  context.mock.method(globalThis, "fetch", async () => assert.fail("Injected services must not call fetch"));
+  const calls: { method: string; args: unknown[] }[] = [];
+  const gps = { ...origin, id: "device:current" };
+  const services: ConversationServices = {
+    searchLocations: async (query, reference) => { calls.push({ method: "locations", args: [query, reference] }); return [query === "Starttown" ? origin : destination]; },
+    searchPlaces: async (...args) => { calls.push({ method: "places", args }); return places; },
+    requestRoute: async (...args) => { calls.push({ method: "detour", args }); return fixtureRoute; },
+    requestRouteAlternatives: async (...args) => { calls.push({ method: "alternatives", args }); return [fixtureRoute]; },
+    requestCurrentLocation: async () => { calls.push({ method: "gps", args: [] }); return gps; },
+  };
+  let commits = 0;
+  const navigation = new NavigationController(async () => { commits += 1; return fixtureRoute; });
+  const engine = new ConversationEngine(navigation, { onPlaces: () => {}, onSelectPlace: () => {}, onDetours: () => {}, getReferenceLocation: () => null }, services);
+  await engine.send("Plan a route from current location to Oxford");
+  assert.equal(commits, 0);
+  assert.equal(navigation.getSnapshot().route, null);
+  assert.deepEqual(calls.slice(0, 2), [{ method: "gps", args: [] }, { method: "locations", args: ["Oxford", gps] }]);
+  await engine.confirm();
+  assert.equal(commits, 1);
+  const session = navigation.getSnapshot();
+  await engine.find("restaurant", "route");
+  await engine.compare();
+  await engine.send("Check other routes");
+  assert.deepEqual(calls.find((call) => call.method === "places")?.args, ["restaurant", gps, "route", fixtureRoute.geometry]);
+  assert.deepEqual(calls.find((call) => call.method === "detour")?.args, [[gps, places[0], destination]]);
+  assert.deepEqual(calls.find((call) => call.method === "alternatives")?.args, [[gps, destination]]);
+  assert.strictEqual(navigation.getSnapshot(), session);
+  assert.equal(commits, 1);
+  await engine.send("Plan a route from Starttown to Oxford");
+  assert.deepEqual(calls.at(-2), { method: "locations", args: ["Starttown", undefined] });
+  assert.deepEqual(calls.at(-1), { method: "locations", args: ["Oxford", origin] });
+  assert.strictEqual(navigation.getSnapshot(), session);
+});
+
+function mockResponses(context: TestContext, handler: (path: string, body: Record<string, unknown>) => unknown | Promise<unknown>) {
+  const previous = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const result = await handler(String(input), JSON.parse(String(init?.body)) as Record<string, unknown>);
+    return result instanceof Response ? result : Response.json(result);
+  };
+  context.after(() => { globalThis.fetch = previous; });
+}
+
+test("conversation rejects missing prerequisites, unknown places, empty confirmations and invalid choices", async () => {
+  const navigation = new NavigationController(async () => fixtureRoute);
+  const engine = new ConversationEngine(navigation, { onPlaces: () => {}, onSelectPlace: () => {}, onDetours: () => {}, getReferenceLocation: () => null });
+  await assert.rejects(engine.find("fuel", "nearby"), /Set an origin/);
+  await assert.rejects(engineFixture(navigation).find("fuel", "route"), /Calculate a route/);
+  await assert.rejects(engine.compare(), /Search for places first/);
+  await assert.rejects(engine.confirm(), /no destination change/);
+  await assert.rejects(engine.chooseLocation(9), /not in the current/);
+  assert.throws(() => engine.selectPlace(places[0]), /not in the latest/);
+  engine.selectPlace(null);
+  assert.equal(await engine.send("   "), "");
+  assert.match(await engine.send("How long will it take?"), /Calculate a route/);
+  assert.match(await engine.send("How far is my destination?"), /Calculate a route/);
+  assert.match(await engine.send("हाँ"), /पहले/);
+  assert.match(await engine.send("कितना टाइम लगेगा"), /पहले/);
+  assert.match(await engine.send("कितनी दूरी है"), /पहले/);
+});
+
+for (const origins of [[], [origin, destination], [origin]]) {
+  test(`named-origin route planning handles ${origins.length} origin matches`, async (context) => {
+    mockResponses(context, (_path, body) => body.query === "London" ? origins : [destination]);
+    const navigation = new NavigationController(async () => fixtureRoute);
+    const engine = engineFixture(navigation);
+    const reply = await engine.send("Plan a route from London to Oxford");
+    if (origins.length === 1) {
+      assert.match(reply, /Plan a driving route from Test origin/);
+      await engine.send("confirm route");
+      assert.equal(navigation.getSnapshot().origin?.id, origin.id);
+      assert.equal(navigation.getSnapshot().destination?.id, destination.id);
+    } else {
+      assert.match(reply, origins.length ? /multiple matches/ : /could not find/);
+      assert.equal(engine.getSnapshot().pendingDestination, null);
+    }
+  });
+}
+
+test("a first destination can use the available reference location without requesting GPS", async (context) => {
+  mockServices(context, undefined, [destination]);
+  const navigation = new NavigationController(async () => fixtureRoute);
+  const engine = engineFixture(navigation);
+  await engine.send("Navigate to Oxford");
+  assert.equal(engine.getSnapshot().pendingOrigin?.id, origin.id);
+  await engine.send("हाँ");
+  assert.equal(navigation.getSnapshot().destination?.id, destination.id);
+  assert.match(engine.getSnapshot().messages.at(-1)?.text ?? "", /मिनट/);
+});
+
+test("affirmative answers clarify multiple address choices and cancellation leaves the journey unchanged", async (context) => {
+  mockServices(context, undefined, [origin, destination]);
+  const navigation = await controllerFixture();
+  const previous = navigation.getSnapshot();
+  const engine = engineFixture(navigation);
+  await engine.send("Navigate to Oxford");
+  assert.match(await engine.send("yes please"), /Which destination match/);
+  await engine.send("No thanks");
+  assert.equal(engine.getSnapshot().pendingLocationChoices.length, 0);
+  assert.strictEqual(navigation.getSnapshot(), previous);
+});
+
+for (const operation of ["search", "alternatives", "addresses"] as const) {
+  test(`late ${operation} results cannot survive a journey revision`, async (context) => {
+    let release!: () => void;
+    let began!: () => void;
+    const started = new Promise<void>((resolve) => { began = resolve; });
+    const waiting = new Promise<void>((resolve) => { release = resolve; });
+    mockResponses(context, async (path) => { began(); await waiting; return path === "/api/places" ? places : path === "/api/route" ? [fixtureRoute] : [destination]; });
+    const navigation = await controllerFixture();
+    const engine = engineFixture(navigation);
+    const request = operation === "search" ? engine.find("restaurant", "route") : engine.send(operation === "alternatives" ? "Check other routes" : "Navigate to Oxford");
+    await started;
+    await navigation.execute({ type: "SET_ROUTE", origin, destination: { ...destination, id: "test:replacement" } });
+    release();
+    await assert.rejects(request, /changed/);
+    assert.equal(navigation.getSnapshot().destination?.id, "test:replacement");
+    assert.equal(engine.getSnapshot().recentPlaces.length, 0);
+  });
+}
+
+test("in-flight conversation requests reject concurrent send, confirm and address selection", async (context) => {
+  let release!: () => void;
+  let began!: () => void;
+  const started = new Promise<void>((resolve) => { began = resolve; });
+  mockResponses(context, async () => { began(); await new Promise<void>((resolve) => { release = resolve; }); return [destination]; });
+  const engine = engineFixture(await controllerFixture());
+  const request = engine.send("Navigate to Oxford");
+  await started;
+  await assert.rejects(engine.send("How far is it?"), /Please wait/);
+  await assert.rejects(engine.confirm(), /Please wait/);
+  await assert.rejects(engine.chooseLocation(0), /Please wait/);
+  release();
+  await request;
+  assert.equal(engine.getSnapshot().pendingDestination?.id, destination.id);
+});
+
+test("without a route comparison reports straight-line distances and preserves place selection", async (context) => {
+  mockServices(context);
+  const navigation = new NavigationController(async () => fixtureRoute);
+  const engine = engineFixture(navigation);
+  await engine.find("restaurant", "nearby");
+  engine.selectPlace(places[0]);
+  assert.equal(engine.getSnapshot().selectedPlaceId, places[0].id);
+  assert.match(await engine.compare(), /Driving detours are not available/);
+  engine.setLanguage("hi");
+  assert.match(await engine.compare(), /सीधी दूरी/);
+  engine.selectPlace(null);
+  assert.equal(engine.getSnapshot().selectedPlaceId, null);
+  assert.equal(navigation.getSnapshot().route, null);
+});
+
+test("detour comparisons report shorter drives, partial outages and complete failure without changing the route", async (context) => {
+  let requests = 0;
+  mockResponses(context, (path) => path === "/api/places" ? places : ++requests === 1 ? { ...fixtureRoute, durationSeconds: 300 } : new Response("{}", { status: 502 }));
+  const navigation = await controllerFixture();
+  const previous = navigation.getSnapshot();
+  const engine = engineFixture(navigation);
+  await engine.find("restaurant", "route");
+  engine.setLanguage("hi");
+  const reply = await engine.compare();
+  assert.match(reply, /कम/);
+  assert.match(reply, /उपलब्ध नहीं/);
+  await assert.rejects(engine.compare(), /Detours could not be calculated/);
+  assert.strictEqual(navigation.getSnapshot(), previous);
+});
+
+test("a route changed during comparison discards every delayed detour", async (context) => {
+  let release!: () => void;
+  let began!: () => void;
+  const started = new Promise<void>((resolve) => { began = resolve; });
+  const waiting = new Promise<void>((resolve) => { release = resolve; });
+  mockResponses(context, async (path) => { if (path === "/api/places") return places; began(); await waiting; return fixtureRoute; });
+  const navigation = await controllerFixture();
+  const engine = engineFixture(navigation);
+  await engine.find("restaurant", "nearby");
+  const request = engine.compare();
+  await started;
+  await navigation.execute({ type: "SET_ROUTE", origin, destination });
+  release();
+  await assert.rejects(request, /route changed during comparison/);
+});
+
+test("place details handle implicit single results, route distances, metadata and missing references", async (context) => {
+  let results = [{ ...places[0], address: "123 Example Street", openingHours: "24/7" }];
+  mockResponses(context, () => results);
+  const navigation = await controllerFixture();
+  const engine = engineFixture(navigation);
+  await engine.find("restaurant", "route");
+  assert.match(await engine.send("Show details"), /from the route corridor/);
+  assert.match(await engine.send("पहले वाले की जानकारी बताओ"), /123 Example Street/);
+  results = [];
+  await engine.find("restaurant", "nearby");
+  engine.setLanguage("en");
+  assert.match(await engine.send("Show details"), /Which result/);
+  assert.match(await engine.send("जानकारी बताओ"), /कौन सा नतीजा/);
+});
+
+test("nearest searches with no matches and named results with duplicate names do not propose a destination", async (context) => {
+  let results: PlaceResult[] = [];
+  mockResponses(context, () => results);
+  const navigation = await controllerFixture();
+  const engine = engineFixture(navigation);
+  assert.match(await engine.send("Navigate to the nearest restaurant"), /No matching places/);
+  assert.match(await engine.send("Find restaurants nearby"), /No matching OpenStreetMap/);
+  assert.match(await engine.send("पास में रेस्टोरेंट दिखाओ"), /कोई जगह नहीं/);
+  results = places.map((place) => ({ ...place, name: "Cedar Bistro" }));
+  await engine.find("restaurant", "nearby");
+  assert.match(await engine.send("Navigate to Cedar Bistro"), /Several results/);
+  assert.equal(engine.getSnapshot().pendingDestination, null);
+  results = results.slice(0, 1);
+  await engine.find("restaurant", "nearby");
+  await engine.send("Navigate to Cedar Bistro");
+  assert.equal(engine.getSnapshot().pendingDestination?.id, places[0].id);
+});
+
+test("Hindi place search and explicit Stop preserve the same mutation boundaries as English", async (context) => {
+  mockServices(context);
+  const navigation = await controllerFixture();
+  const engine = engineFixture(navigation);
+  assert.match(await engine.send("पास में रेस्टोरेंट दिखाओ"), /पाँच किलोमीटर/);
+  assert.match(await engine.send("रास्ते में रेस्टोरेंट दिखाओ"), /डेढ़ किलोमीटर/);
+  const previous = navigation.getSnapshot();
+  await engine.send("कितना टाइम लगेगा");
+  await engine.send("कितनी दूरी है");
+  await engine.send("ट्रैफिक है क्या");
+  assert.strictEqual(navigation.getSnapshot(), previous);
+  await engine.send("नेविगेशन बंद करो");
+  assert.equal(navigation.getSnapshot().route, null);
+  assert.equal(engine.getSnapshot().recentPlaces.length, 0);
+});
+
 test("route questions, place searches, details, and comparisons never mutate navigation", async (context) => {
   mockServices(context);
   const navigation = await controllerFixture();
@@ -457,6 +761,159 @@ class RecognitionStub {
   }
   abort() { this.aborted = true; this.onend?.(); }
 }
+
+function microphoneFixture(context: TestContext, mode: boolean | string = true, upgrade?: () => Promise<void>) {
+  context.mock.timers.enable({ apis: ["setTimeout"] });
+  let released = 0;
+  const track = { readyState: "live", getSettings: () => ({ echoCancellation: mode }), getCapabilities: () => ({ echoCancellation: upgrade ? [true, false, "all"] : [true, false] }), applyConstraints: upgrade, stop: () => { released += 1; } } as unknown as MediaStreamTrack;
+  const stream = { getTracks: () => [track], getAudioTracks: () => [track] } as unknown as MediaStream;
+  mockBrowser(context, { window: { SpeechRecognition: RecognitionStub }, navigator: { language: "en-US", mediaDevices: { getUserMedia: async () => stream } } });
+  return { track, stream, released: () => released };
+}
+
+test("silent processed-track recognition falls back once and still accepts continuous submissions", async (context) => {
+  const fixture = microphoneFixture(context);
+  const warnings: string[] = [];
+  const completed: string[] = [];
+  context.after(startMicrophoneInterruption({ keepAlive: true, onReady: () => {}, onSpeech: () => {}, onComplete: (text) => completed.push(text), onCaptureFallback: (text) => warnings.push(text), onError: (message) => assert.fail(message) }));
+  await Promise.resolve();
+  const first = RecognitionStub.latest;
+  first.onstart?.();
+  context.mock.timers.tick(6000);
+  const fallback = RecognitionStub.latest;
+  assert.notEqual(fallback, first);
+  assert.equal(first.aborted, true);
+  assert.equal(fixture.released(), 1);
+  assert.deepEqual(fallback.startArgumentCounts, [0]);
+  fallback.onstart?.();
+  fallback.onresult?.({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: "Hitech City Submit" } }] });
+  assert.deepEqual(completed, ["Hitech City"]);
+  context.mock.timers.tick(120000);
+  assert.equal(warnings.length, 1);
+  assert.equal(fallback.aborted, false);
+});
+
+test("raw results including rejected echo keep working track recognition from being downgraded", async (context) => {
+  microphoneFixture(context);
+  let results = 0;
+  context.after(startMicrophoneInterruption({ keepAlive: true, spokenText: "The current driving route is ready", onReady: () => {}, onResult: () => { results += 1; }, onSpeech: () => assert.fail("Echo"), onCaptureFallback: () => assert.fail("Working track"), onError: (message) => assert.fail(message) }));
+  await Promise.resolve();
+  const recognition = RecognitionStub.latest;
+  recognition.onstart?.();
+  recognition.onresult?.({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: "The current driving route is ready" } }] });
+  context.mock.timers.tick(10000);
+  assert.equal(results, 1);
+  assert.equal(RecognitionStub.latest, recognition);
+});
+
+for (const failure of ["OverconstrainedError", "NotSupportedError", "unexpected"]) {
+  test(`all-system cancellation upgrade failure preserves usable input: ${failure}`, async (context) => {
+    const fixture = microphoneFixture(context, true, async () => { throw failure === "unexpected" ? new Error("upgrade failed") : new DOMException("unsupported", failure); });
+    let warnings = 0;
+    context.after(startMicrophoneInterruption({ onSpeech: () => {}, onCaptureFallback: () => { warnings += 1; }, onError: (message) => assert.fail(message) }));
+    await new Promise(setImmediate);
+    assert.equal(RecognitionStub.latest.audioTrack, failure === "unexpected" ? undefined : fixture.track);
+    assert.equal(warnings, failure === "unexpected" ? 1 : 0);
+  });
+}
+
+test("advertised all-system mode is applied and late upgrades are cancelled without starting recognition", async (context) => {
+  let upgrade!: () => void;
+  const fixture = microphoneFixture(context, "all", () => new Promise<void>((resolve) => { upgrade = resolve; }));
+  const before = RecognitionStub.latest;
+  const stop = startMicrophoneInterruption({ onSpeech: () => {}, onError: (message) => assert.fail(message) });
+  await Promise.resolve();
+  stop();
+  upgrade();
+  await new Promise(setImmediate);
+  assert.equal(fixture.released(), 1);
+  assert.equal(RecognitionStub.latest, before);
+});
+
+test("supported all-system mode passes the processed track to recognition", async (context) => {
+  const fixture = microphoneFixture(context, "all", async () => {});
+  context.after(startMicrophoneInterruption({ onSpeech: () => {}, onError: (message) => assert.fail(message) }));
+  await new Promise(setImmediate);
+  assert.equal(RecognitionStub.latest.audioTrack, fixture.track);
+});
+
+test("synchronous track rejection cannot overwrite compatibility recognizer cleanup", async (context) => {
+  const fixture = microphoneFixture(context);
+  class RejectTrack extends RecognitionStub {
+    start(audioTrack?: MediaStreamTrack) { if (audioTrack) throw new DOMException("no track", "NotSupportedError"); super.start(); }
+  }
+  Object.assign(window, { SpeechRecognition: RejectTrack });
+  const warnings: string[] = [];
+  const stop = startMicrophoneInterruption({ onReady: () => {}, onSpeech: () => {}, onCaptureFallback: (message) => warnings.push(message), onError: (message) => assert.fail(message) });
+  await new Promise(setImmediate);
+  const fallback = RecognitionStub.latest;
+  fallback.onstart?.();
+  assert.equal(fixture.released(), 1);
+  assert.equal(warnings.length, 1);
+  stop();
+  assert.equal(fallback.aborted, true);
+});
+
+for (const name of ["NotAllowedError", "SecurityError", "NotReadableError"]) {
+  test(`capture failure uses the correct permission or compatibility path: ${name}`, async (context) => {
+    microphoneFixture(context);
+    const errors: string[] = [];
+    const warnings: string[] = [];
+    context.mock.method(navigator.mediaDevices, "getUserMedia", async () => { throw new DOMException("capture failed", name); });
+    context.after(startMicrophoneInterruption({ onSpeech: () => {}, onCaptureFallback: (message) => warnings.push(message), onError: (message) => errors.push(message) }));
+    await new Promise(setImmediate);
+    assert.equal(errors.length, name === "NotReadableError" ? 0 : 1);
+    assert.equal(warnings.length, name === "NotReadableError" ? 1 : 0);
+  });
+}
+
+test("missing media capture uses native input and native errors still stop safely", (context) => {
+  mockBrowser(context, { navigator: { language: "en-US" }, window: { SpeechRecognition: RecognitionStub } });
+  const errors: string[] = [];
+  context.after(startMicrophoneInterruption({ onSpeech: () => {}, onError: (message) => errors.push(message) }));
+  assert.deepEqual(RecognitionStub.latest.startArgumentCounts, [0]);
+  RecognitionStub.latest.onerror?.({ error: "network" });
+  assert.match(errors[0], /could not connect/);
+});
+
+test("missing or ended microphone tracks fail visibly and release streams", async (context) => {
+  const fixture = microphoneFixture(context);
+  Object.assign(fixture.track, { readyState: "ended" });
+  const errors: string[] = [];
+  context.after(startMicrophoneInterruption({ onSpeech: () => {}, onError: (message) => errors.push(message) }));
+  await Promise.resolve();
+  assert.match(errors[0], /No live microphone/);
+  assert.equal(fixture.released(), 1);
+});
+
+test("persistent recognition survives time limits, discards drafts and submits independent turns", (context) => {
+  context.mock.timers.enable({ apis: ["setTimeout"] });
+  mockBrowser(context, { navigator: { language: "en-US" }, window: { SpeechRecognition: RecognitionStub } });
+  const completed: string[] = [];
+  const drafts: string[] = [];
+  let discarded = 0;
+  context.after(startRecognition({ keepAlive: true, onTranscript: (text) => drafts.push(text), onComplete: (text) => completed.push(text), onDiscard: () => { discarded += 1; }, onEnd: () => assert.fail("Persistent timeout"), onError: (reason) => assert.fail(reason) }));
+  const recognition = RecognitionStub.latest;
+  context.mock.timers.tick(180000);
+  const result = (text: string) => ({ isFinal: true, 0: { transcript: text } });
+  recognition.onresult?.({ resultIndex: 0, results: [result("Unsent destination Discard")] });
+  assert.equal(discarded, 1);
+  assert.equal(drafts.at(-1), "");
+  recognition.onresult?.({ resultIndex: 1, results: [result("Unsent destination Discard"), result("Hitech City Submit")] });
+  recognition.onresult?.({ resultIndex: 2, results: [result("Unsent destination Discard"), result("Hitech City Submit"), result("How far is it Send")] });
+  assert.deepEqual(completed, ["Hitech City", "How far is it"]);
+  assert.equal(recognition.aborted, false);
+});
+
+test("interruption discard resets speech state and forwards draft deletion", (context) => {
+  let discards = 0;
+  let speech = 0;
+  const { recognition } = interruptionFixture(context, { keepAlive: true, playbackActive: () => false, onSpeech: () => { speech += 1; }, onDiscard: () => { discards += 1; }, onError: (message) => assert.fail(message) });
+  recognition.onresult?.({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: "Discard" } }] });
+  recognition.onresult?.({ resultIndex: 1, results: [{ isFinal: true, 0: { transcript: "Discard" } }, { isFinal: false, 0: { transcript: "Next draft" } }] });
+  assert.equal(discards, 1);
+  assert.equal(speech, 2);
+});
 
 test("ordinary microphone input uses zero arguments on initial start and native restart", (context) => {
   context.mock.timers.enable({ apis: ["setTimeout"] });
@@ -609,7 +1066,7 @@ test("interruption uses an echo-cancelled microphone track during active playbac
   let constraints: MediaStreamConstraints | undefined;
   let released = 0;
   let ready = 0;
-  const track = { getSettings: () => ({ echoCancellation: true }), stop: () => { released += 1; } } as unknown as MediaStreamTrack;
+  const track = { readyState: "live", getSettings: () => ({ echoCancellation: true }), stop: () => { released += 1; } } as unknown as MediaStreamTrack;
   const stream = { getTracks: () => [track], getAudioTracks: () => [track] } as unknown as MediaStream;
   mockBrowser(context, {
     navigator: { language: "en-US", mediaDevices: { getUserMedia: async (request: MediaStreamConstraints) => { constraints = request; return stream; } } },
@@ -624,7 +1081,7 @@ test("interruption uses an echo-cancelled microphone track during active playbac
   });
   context.after(stop);
   await Promise.resolve();
-  assert.deepEqual(constraints, { audio: { echoCancellation: { ideal: true }, noiseSuppression: { ideal: true }, autoGainControl: { ideal: true } }, video: false });
+  assert.deepEqual(constraints, { audio: { echoCancellation: { ideal: true }, noiseSuppression: { ideal: true }, autoGainControl: { ideal: true }, channelCount: { ideal: 1 } }, video: false });
   const recognition = RecognitionStub.latest;
   assert.equal(recognition.audioTrack, track);
   recognition.onstart?.();
@@ -659,26 +1116,27 @@ test("disabling during permission startup releases the late stream without start
   assert.equal(RecognitionStub.latest, previous);
 });
 
-test("microphones without active echo cancellation fail safely and release capture", async (context) => {
+test("microphones without active echo cancellation release capture and visibly use compatibility input", async (context) => {
   let released = 0;
   const errors: string[] = [];
-  const previous = RecognitionStub.latest;
-  const track = { getSettings: () => ({ echoCancellation: false }), stop: () => { released += 1; } } as unknown as MediaStreamTrack;
+  const warnings: string[] = [];
+  const track = { readyState: "live", getSettings: () => ({ echoCancellation: false }), stop: () => { released += 1; } } as unknown as MediaStreamTrack;
   const stream = { getTracks: () => [track], getAudioTracks: () => [track] } as unknown as MediaStream;
-  mockBrowser(context, { navigator: { mediaDevices: { getUserMedia: async () => stream } }, window: { SpeechRecognition: RecognitionStub } });
-  startMicrophoneInterruption({ onSpeech: () => assert.fail("Unprocessed microphone must not interrupt"), onError: (message) => errors.push(message) });
+  mockBrowser(context, { navigator: { language: "en-US", mediaDevices: { getUserMedia: async () => stream } }, window: { SpeechRecognition: RecognitionStub } });
+  context.after(startMicrophoneInterruption({ onSpeech: () => {}, onCaptureFallback: (message) => warnings.push(message), onError: (message) => errors.push(message) }));
   await Promise.resolve();
-  assert.match(errors[0], /echo cancellation/);
+  assert.deepEqual(errors, []);
+  assert.match(warnings[0], /compatibility mode/);
   assert.equal(released, 1);
-  assert.equal(RecognitionStub.latest, previous);
+  assert.deepEqual(RecognitionStub.latest.startArgumentCounts, [0]);
 });
 
 test("microphone tracks are released when the interrupted request is submitted", async (context) => {
   let released = 0;
   const completed: string[] = [];
-  const track = { getSettings: () => ({ echoCancellation: true }), stop: () => { released += 1; } } as unknown as MediaStreamTrack;
+  const track = { readyState: "live", getSettings: () => ({ echoCancellation: true }), stop: () => { released += 1; } } as unknown as MediaStreamTrack;
   const stream = { getTracks: () => [track], getAudioTracks: () => [track] } as unknown as MediaStream;
-  mockBrowser(context, { navigator: { mediaDevices: { getUserMedia: async () => stream } }, window: { SpeechRecognition: RecognitionStub } });
+  mockBrowser(context, { navigator: { language: "en-US", mediaDevices: { getUserMedia: async () => stream } }, window: { SpeechRecognition: RecognitionStub } });
   const stop = startMicrophoneInterruption({ onSpeech: () => {}, onComplete: (text) => completed.push(text), onError: (message) => assert.fail(message) });
   context.after(stop);
   await Promise.resolve();
@@ -1225,7 +1683,7 @@ for (const invalidation of ["cancel", "session clear", "route change"] as const)
 }
 
 for (const language of ["en", "hi"] as const) {
-  test(`${language} destination options retain full addresses but speak only their first five words`, async (context) => {
+  test(`${language} destination options retain full addresses but speak only the option prompt`, async (context) => {
     const locations: Location[] = [
       { ...destination, id: "test:long-one", name: language === "hi" ? "चारमीनार स्मारक लाड बाज़ार के पास हैदराबाद तेलंगाना भारत" : "Charminar\tMonument  Near\nLaad Bazaar, Hyderabad Telangana India" },
       { ...destination, id: "test:long-two", name: language === "hi" ? "चारमीनार बाज़ार मक्का मस्जिद के पास हैदराबाद तेलंगाना भारत" : "Charminar Market Near Mecca Masjid, Hyderabad Telangana India" },
@@ -1244,17 +1702,7 @@ for (const language of ["en", "hi"] as const) {
     for (const location of locations) assert.ok(response.includes(location.name));
     assert.deepEqual(engine.getSnapshot().pendingLocationChoices, locations);
     assert.strictEqual(navigation.getSnapshot(), previous);
-    if (language === "hi") {
-      assert.ok(message.spokenText.includes("विकल्प 1: चारमीनार स्मारक लाड बाज़ार के"));
-      assert.ok(message.spokenText.includes("विकल्प 2: चारमीनार बाज़ार मक्का मस्जिद के"));
-      assert.ok(message.spokenText.includes("विकल्प 3: चारमीनार"));
-      assert.ok(!message.spokenText.includes("पास हैदराबाद"));
-    } else {
-      assert.ok(message.spokenText.includes("Option 1: Charminar Monument Near Laad Bazaar,"));
-      assert.ok(message.spokenText.includes("Option 2: Charminar Market Near Mecca Masjid,"));
-      assert.ok(message.spokenText.includes("Option 3: Charminar"));
-      assert.ok(!message.spokenText.includes("Hyderabad"));
-    }
+    assert.equal(message.spokenText, "Say the option.");
     const spokenText = message.spokenText;
     await engine.chooseLocation(1);
     assert.equal(engine.getSnapshot().pendingDestination, null);
@@ -1272,7 +1720,7 @@ for (const language of ["en", "hi"] as const) {
 }
 
 for (const source of ["active origin", "new current location", "selected starting location"] as const) {
-  test(`only the nearest three in-country destination choices are shown from the ${source}`, async (context) => {
+  test(`only the nearest five in-country destination choices are shown from the ${source}`, async (context) => {
     const reference = source === "active origin" ? { ...origin, countryCode: "gb" } : { ...origin, countryCode: "in", id: source === "selected starting location" ? "test:manual-origin" : "device:current", lat: 17.36, lon: 78.47 };
     const locations: Location[] = [
       { ...reference, id: "test:far", name: "Far landmark on Sample Road, Town Region", lat: reference.lat + 2 },
@@ -1297,17 +1745,18 @@ for (const source of ["active origin", "new current location", "selected startin
     });
     const response = await engine.send(source === "new current location" ? "Plan a route from current location to Charminar" : "Target location Charminar.");
     assert.equal(locationRequests, source === "new current location" ? 1 : 0);
-    assert.deepEqual(engine.getSnapshot().pendingLocationChoices.map((location) => location.id), ["test:nearest", "test:close", "test:second"]);
+    assert.deepEqual(engine.getSnapshot().pendingLocationChoices.map((location) => location.id), ["test:nearest", "test:close", "test:second", "test:middle", "test:fourth"]);
     assert.deepEqual(requests, [{ query: "Charminar", reference: { lat: reference.lat, lon: reference.lon }, countryCode: reference.countryCode }]);
     assert.deepEqual(locations.map((location) => location.id), providerOrder);
     assert.ok(response.includes(`Option 1: ${locations[5].name}`));
     assert.ok(!response.includes(locations[0].name));
     assert.ok(!response.includes(locations[6].name));
     assert.ok(!response.includes(locations[7].name));
-    assert.ok(!response.includes("Option 4:"));
+    assert.ok(response.includes("Option 5:"));
+    assert.ok(!response.includes("Option 6:"));
     const message = engine.getSnapshot().messages.at(-1);
     assert.ok(message?.role === "assistant");
-    assert.ok(message.spokenText?.includes("Option 1: Nearest landmark on Sample Road,"));
+    assert.equal(message.spokenText, "Say the option.");
     assert.strictEqual(navigation.getSnapshot(), previous);
     await engine.send("Option one");
     assert.equal(engine.getSnapshot().pendingDestination, null);
@@ -1394,12 +1843,12 @@ test("Hindi planning, spoken options, cancellation and Deccani confirmation reta
   const engine = new ConversationEngine(navigation, { onPlaces: () => {}, onSelectPlace: () => {}, onDetours: () => {}, getReferenceLocation: () => null, getCurrentLocation: async () => origin });
   assert.match(await engine.send("अभी की लोकेशन से चारमीनार तक रास्ता दिखाओ"), /विकल्प/);
   assert.equal(navigation.getSnapshot().route, null);
-  assert.match(await engine.send("विकल्प दो"), /नोवा सबमिट/);
-  assert.equal(engine.getSnapshot().pendingDestination?.id, "test:other");
-  assert.equal(navigation.getSnapshot().route, null);
+  await engine.send("विकल्प दो");
+  assert.equal(engine.getSnapshot().pendingDestination, null);
+  assert.equal(navigation.getSnapshot().destination?.id, "test:other");
   await engine.send("नक्को");
   assert.equal(engine.getSnapshot().pendingDestination, null);
-  assert.equal(navigation.getSnapshot().route, null);
+  assert.equal(navigation.getSnapshot().destination?.id, "test:other");
   await engine.send("Mereko Charminar leke chalo");
   await engine.send("दो");
   await engine.send("Hau");
@@ -1498,16 +1947,16 @@ for (const text of ["Destination HITECH City. Submit.", "Destination HITECH City
   });
 }
 
-test("bare place names get explicit destination guidance without geocoding or changing the route", async (context) => {
+test("bare place names resolve a destination but preserve the route until confirmation", async (context) => {
   const queries: string[] = [];
-  mockServices(context, undefined, [], queries);
+  mockServices(context, undefined, [{ ...destination, name: "HITECH City" }], queries);
   const navigation = await controllerFixture();
   const previous = navigation.getSnapshot();
   const engine = engineFixture(navigation);
   const reply = await engine.send("HITECH City.");
-  assert.match(reply, /"Destination" or "Target"/);
-  assert.deepEqual(queries, []);
-  assert.equal(engine.getSnapshot().pendingDestination, null);
+  assert.match(reply, /confirm destination/i);
+  assert.deepEqual(queries, ["HITECH City"]);
+  assert.equal(engine.getSnapshot().pendingDestination?.name, "HITECH City");
   assert.strictEqual(navigation.getSnapshot(), previous);
 });
 

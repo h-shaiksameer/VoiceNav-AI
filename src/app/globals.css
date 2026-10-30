@@ -131,6 +131,13 @@ input::placeholder { color: #8d9b91; opacity: 1; }
 .places-empty > span { font-size: 10px; }
 .empty-message { color: var(--muted); font-size: 12px; line-height: 1.5; padding: 22px 0; }
 .places-note { padding-top: 15px; }
+.service-status-list { list-style: none; padding: 0; font-size: 11px; }
+.service-status-list li { padding: 10px 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.service-status-list strong, .service-status-list span { display: block; line-height: 1.5; }
+.service-status-list span { color: var(--muted); }
+.future-enhancements { padding-top: 16px; font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+.future-enhancements summary { cursor: pointer; color: var(--text); }
+.future-enhancements ul { padding-left: 18px; margin-top: 10px; color: var(--muted); }
 .place-detail { margin-top: 15px; border-top: 2px solid #6b8860; padding-top: 13px; }
 .detail-title { display: flex; align-items: center; gap: 8px; color: #dbebc7; }
 .detail-title > svg { flex-shrink: 0; }
