@@ -222,8 +222,10 @@ test("all API endpoints validate contracts and return adapter results", async (c
   assert.equal((await geocodePost(request({ query: "API fixture", countryCode: "IN" }))).status, 200);
   const waypoints = [{ lat: 20, lon: 80 }, { lat: 20.01, lon: 80.01 }];
   assert.equal((await routePost(request({ waypoints }))).status, 200);
+  const multiStopWaypoints = [...waypoints, { lat: 20.02, lon: 80.02 }, { lat: 20.03, lon: 80.03 }];
+  assert.equal((await routePost(request({ waypoints: multiStopWaypoints }))).status, 200);
   assert.equal((await routePost(request({ waypoints, alternatives: true }))).status, 200);
-  assert.equal((await routePost(request({ waypoints: [...waypoints, waypoints[0]], alternatives: true }))).status, 400);
+  assert.equal((await routePost(request({ waypoints: multiStopWaypoints, alternatives: true }))).status, 400);
   assert.equal((await placesPost(request({ category: "parking", center: waypoints[0], scope: "nearby" }))).status, 200);
   assert.equal((await placesPost(request({ category: "parking", center: waypoints[0], scope: "route" }))).status, 400);
   assert.equal((await placesPost(request({ category: "parking", center: waypoints[0], scope: "route", geometry }))).status, 200);

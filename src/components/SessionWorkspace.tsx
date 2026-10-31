@@ -1,6 +1,6 @@
 "use client";
 
-import { Compass, Radio } from "lucide-react";
+import { Compass, Radio, Route as RouteIcon } from "lucide-react";
 import { PlaceResults } from "@/components/PlaceResults/PlaceResults";
 import { RoutePanel } from "@/components/RoutePanel/RoutePanel";
 import { VoiceAssistant } from "@/components/VoiceAssistant/VoiceAssistant";
@@ -10,14 +10,16 @@ import { serviceAvailability } from "@/services/availability";
 import { useSyncExternalStore } from "react";
 import { useNavigationApp } from "./useNavigationApp";
 
-type Props = { name: string; active: boolean; online: boolean };
+type Props = { name: string; active: boolean; online: boolean; mobileSidebarOpen: boolean; onCloseMobileSidebar: () => void; onOpenOptimizer: () => void };
 
-export function SessionWorkspace({ name, active, online }: Props) {
+export function SessionWorkspace({ name, active, online, mobileSidebarOpen, onCloseMobileSidebar, onOpenOptimizer }: Props) {
   const app = useNavigationApp();
   const services = useSyncExternalStore(serviceAvailability.subscribe, serviceAvailability.getSnapshot, serviceAvailability.getServerSnapshot);
 
   return <main className={`session-workspace ${active ? "session-workspace-active" : ""}`} aria-hidden={!active}>
-    <aside className="sidebar" aria-label={`${name} planner and places`}>
+    <aside className={`sidebar ${mobileSidebarOpen ? "mobile-sidebar-open" : ""}`} aria-label={`${name} planner and places`}>
+      <div className="mobile-sidebar-top"><div className="mobile-sidebar-meta"><span className="header-caption">{name}</span><span className="demo-badge">SESSION</span><span className="privacy-label"><Compass size={15} /> Independent workspace</span></div><button className="icon-button" type="button" aria-label="Close journey planner" title="Close journey planner" onClick={onCloseMobileSidebar}><span aria-hidden="true">×</span></button></div>
+      <button className="optimizer-launch-button" type="button" onClick={onOpenOptimizer}><RouteIcon />Optimize Multi-Stop Trip</button>
       <RoutePanel origin={app.origin} destination={app.destination} session={app.session} alternatives={app.alternatives} onCheckAlternatives={() => void app.externalMessage("Check other routes")} busy={app.working} locating={app.locating} error={app.routeError} trackingStatus={app.trackingStatus} movement={app.movement} progress={app.progress} offRoute={app.offRoute} onOrigin={app.setOrigin} onDestination={app.setDestination} onLocate={app.locate} onSearch={() => void app.calculateRoute()} onStart={() => void app.startJourney()} onPause={app.pauseJourney} onResume={app.resumeJourney} onEnd={app.endJourney} onRecalculate={() => void app.recalculateJourney()} onStop={() => void app.stopRoute()} />
       <PlaceResults category={app.category} scope={app.scope} search={app.search} selected={app.selected} detours={app.detours} busy={app.working} hasRoute={!!app.session.route} error={app.placeError} unavailable={services.places.status === "unavailable" ? services.places.message : undefined} onCategory={app.setCategory} onScope={app.setScope} onSearch={() => void app.findPlaces()} onSelect={app.setSelected} onNavigate={app.navigateTo} onCompare={() => void app.externalMessage("Compare options")} />
       <footer className="sidebar-footer"><Compass size={14} /><span>{name}</span><span>SESSION</span></footer>

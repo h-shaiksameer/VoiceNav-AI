@@ -61,13 +61,14 @@ c8 writes ignored reports under `coverage/`: `index.html` (HTML report), `lcov.i
 | Same safety suite: voice | Final Send/Submit vs interim/silence, Discard, noise cleanup, retained drafts, playback filtering, same-recognizer continuous turns, native restarts, zero-argument native input, processed-track startup/fallback, six-second no-result heuristic, raw echo events, AEC upgrade failures, late cancellation, permissions and track cleanup |
 | [tests/services.test.ts](tests/services.test.ts) | Availability notifications, unknown/outage/recovery, 429/5xx/network/JSON/schema failures, non-outage 4xx input errors, client request contracts |
 | [tests/server/services.test.ts](tests/server/services.test.ts) | Same-origin/JSON/body-size/schema boundary, sanitized errors, cache TTL/capacity/in-flight deduplication, queue limits/recovery, throttling, upstream failures/timeouts, country lookup/filtering, OSRM coordinate order/alternatives, Overpass corridor limits/partial timeouts, all POST endpoints |
-| [tests/ui.test.ts](tests/ui.test.ts) | Stable runtime identity, latest selected-origin reference, route preservation on failure, stale-result cleanup, service-status states/recovery, unavailable Places controls/retry; normal voice and isolated Map voice header/transcript behavior |
+| [tests/optimizer.test.ts](tests/optimizer.test.ts) | Exact multi-stop ordering, incomplete matrix rejection, and coordinate-only route payloads |
+| [tests/ui.test.ts](tests/ui.test.ts) | Stable runtime identity, latest selected-origin reference, route preservation on failure, stale-result cleanup, service-status states/recovery, unavailable Places controls/retry; normal voice and isolated Map voice header/transcript behavior; persistent Main journey/session drawer behavior |
 
 Server fixtures advance mocked time and use unique cache keys. Do not introduce live API calls or real delay loops into these tests.
 
 ## Latest Validation
 
-The current suite passes 357 tests: 345 client/unit/UI tests and 12 server tests. TypeScript and repository-wide lint pass. The last complete coverage run reported 99.10% statements, 99.10% lines, 97.86% functions and 94.75% branches, so the 95% branch gate remains outstanding by 0.25 points; rerun coverage after adding new tests. The DOM/audio tests simulate browser events; they are not live microphone verification.
+The current suite count is updated after each full run; it includes the multi-stop optimizer regressions for exact ordering, matrix validation and four-waypoint route requests. TypeScript and repository-wide lint must pass. The last complete coverage run reported 99.10% statements, 99.10% lines, 97.86% functions and 94.75% branches, so the 95% branch gate remains outstanding by 0.25 points; rerun coverage after adding new tests. The DOM/audio tests simulate browser events; they are not live microphone verification.
 
 Playwright checks against the running Next.js app passed at 1440 x 1000 and 390 x 844: simulated 502 availability, disabled controls with enabled retry, recovery after a valid response, shared status updates from a conversational search, labeled retained results and no horizontal/control overflow. Map tiles rendered. API responses were intercepted locally for these checks and removed afterward; this does not assert live Nominatim/OSRM/Overpass uptime.
 

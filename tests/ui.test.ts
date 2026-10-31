@@ -242,11 +242,11 @@ test("map sessions open from the hamburger and support create, switch and delete
   fireEvent.click(view.getByRole("button", { name: "+ New session" }));
   fireEvent.click(view.getByRole("button", { name: "+ New session" }));
   const sessionList = view.getByRole("complementary", { name: "Map sessions" }).querySelector(".session-list")!;
-  assert.equal(sessionList.querySelectorAll("li").length, 2);
+  assert.equal(sessionList.querySelectorAll("li").length, 3);
   fireEvent.click(sessionList.querySelector("li button")!);
   assert.equal(sessionList.querySelector("[aria-label='Delete Session 1']")?.getAttribute("aria-label"), "Delete Session 1");
   fireEvent.click(view.getByRole("button", { name: "Delete Session 1" }));
   assert.equal(view.queryByRole("button", { name: /Delete Session 1/ }), null);
-  assert.equal(sessionList.querySelectorAll("li").length, 1);
+  assert.equal(sessionList.querySelectorAll("li").length, 2);
   assert.ok(sessionList.textContent?.includes("Session 2"));
 });

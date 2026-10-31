@@ -21,6 +21,7 @@
     "@fontsource/space-grotesk": "^5.2.0",
     "@turf/helpers": "^7.3.0",
     "@turf/point-to-line-distance": "^7.3.0",
+    "@vercel/analytics": "^2.0.1",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.468.0",
     "next": "^16.0.0",

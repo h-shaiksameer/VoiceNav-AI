@@ -55,7 +55,7 @@ Production preview:
 npm run start
 ```
 
-See [TESTING.md](TESTING.md) for running individual suites, enforced coverage gates, generated reports and manual device checks. The latest test run passes 357 tests, type checking and repository-wide lint. Coverage is aggregate across the configured core modules, not the entire UI or proof of live audio quality; the last measured branch metric was 94.75%, below the configured 95% gate by 0.25 points.
+See [TESTING.md](TESTING.md) for running individual suites, enforced coverage gates, generated reports and manual device checks. The latest test run passes 360 tests, type checking and repository-wide lint. Coverage is aggregate across the configured core modules, not the entire UI or proof of live audio quality; the last measured branch metric was 94.75%, below the configured 95% gate by 0.25 points.
 
 ## Feature And Service Status
 
@@ -63,6 +63,7 @@ See [TESTING.md](TESTING.md) for running individual suites, enforced coverage ga
 | --- | --- |
 | Address search and one-time current GPS location | Implemented; Nominatim/network and browser permissions apply |
 | Driving route, distance, static ETA and map geometry | Implemented through OSRM; no live traffic |
+| Multi-stop trip optimizer | Implemented for 2–12 selected locations; OSRM road estimates choose the starting point and visiting order; no live traffic |
 | Nearby and along-route places | Implemented through Overpass; provider outages are shown as temporarily unavailable |
 | Petrol, restaurants, hospitals, pharmacies, ATMs, parking, cafes, EV charging | Implemented categories sharing the same Overpass service |
 | Place details and comparisons | OSM metadata, straight-line distances, and real driving detours for up to three returned places |
@@ -117,6 +118,15 @@ If Overpass returns HTTP 502, the Places panel explicitly says **Places temporar
 - Alternatives are previews only; selecting an alternative does not replace the active route.
 - Reset map returns the viewport to the default world view. Viewport commands are workspace-local and do not mutate navigation state.
 
+### Multi-Stop Trip Optimizer
+
+- Open **Optimize Multi-Stop Trip** from the journey planner to use an independent route workspace.
+- Add between two and twelve locations, using explicit location search and duplicate-stop protection.
+- The optimizer requests an OSRM travel matrix, chooses the fastest starting point and visiting order, then requests one route for the ordered stops.
+- Up to ten stops use an exact duration-first search; larger lists use a deterministic nearest-neighbor fallback.
+- Distances and durations are road-network estimates. Live traffic, congestion and traffic-aware departure times are not available.
+- The optimizer does not mutate the main journey, map sessions, origin/destination fields or navigation state.
+
 ### Places And Details
 
 - Place categories include petrol/fuel, restaurants, hospitals, pharmacies, ATMs, parking, cafes, and EV charging.
@@ -147,6 +157,8 @@ If Overpass returns HTTP 502, the Places panel explicitly says **Places temporar
 ### Sessions And Isolation
 
 - Each map session owns its origin, destination, route, search results, pending navigation state, map viewport commands, and assistant runtime.
+- Multi-stop optimizer stops and the latest result are saved per workspace in the browser. Loading the optimizer, switching sessions, or returning to the main journey does not discard them.
+- The right-hand **Map sessions** menu shows the main journey and independent sessions, with a **Clear trip stops** action for each saved workspace. Deleting a session also deletes its optimizer data; other workspaces remain unchanged.
 - Session changes cannot overwrite another session’s route or map command.
 - The microphone owner is shared across workspaces, so only one active voice flow can listen at a time.
 - Deleting or switching sessions does not silently copy route or destination state into another session.
@@ -166,11 +178,12 @@ These are not implemented and are listed separately in the UI:
 1. Select **My location**, or enter an origin and explicitly submit its address search using the search icon or Enter.
 2. Select an exact origin result. Do the same for the destination, then select **Search Route**.
 3. Inspect the actual OSRM driving distance, duration, and route geometry on the map.
-4. Choose a place category and **Nearby** or **Along route**, then submit the search. Nearby searches use the active route origin, or the manually selected origin when there is no route.
-5. Select a result to inspect it. The comparison action calculates driving detours for up to the first three results when a route exists. Without a route, conversational comparison reports only the available straight-line distances.
-6. Type a request, or start the normal Nova microphone while safely stopped. For reliable voice use, end the spoken request with English **Send** or **Submit**, for example **Hitech City Submit**. Hindi send words are experimental and not supported as a reliable microphone workflow. Map-only commands belong in the header’s Map voice mode; Nova does not interpret them as destination searches. Normal Nova controls, confirmation and draft behavior remain separate from Map voice.
-7. Give an explicit navigation request. If several addresses are returned, click an option or say **option two, Submit** / **विकल्प दो सबमिट**. Selecting a valid option confirms that requested navigation change and calculates the route immediately, without a second confirmation prompt. Option buttons remain usable while the list is spoken and stop playback before routing. Say **Skip**, **skip karo**, **chhod do**, or **छोड़ दो** to discard all current destination options and ask for a completely new destination without changing the active journey. Single-result proposals still accept **confirm route, Submit**, **confirm destination, Submit**, **yes, Submit**, or **cancel, Submit**. The microphone may reopen for a bounded 15-second follow-up; this recording limit does not expire the request. Choices and proposals have no time-based expiry, including beyond five minutes. Informational questions preserve them. Cancellation, Skip, clearing the navigation session, successful routing, or an explicit replacement navigation/place-search request can invalidate them. Normal microphone startup waits 400 ms after playback; Stop/hide/collapse cancel capture, not the retained address request. Spoken replies have replay/stop controls.
-8. For map-only controls, enable **Map voice** in the application header. Speak a command and pause for one second, or finish with **Send/Submit** for immediate execution. The live transcript appears beside the header button and clears after execution. Map voice is silent, automatically restarts after recognition endings, and remains active until disabled or stopped by a fatal browser permission/support error. Opening Nova disables it. **Allow interruptions** remains a separate normal-Nova feature.
+4. To plan a multi-stop trip, open **Optimize Multi-Stop Trip**, add at least two locations, and choose **Optimize Route**. Review the recommended starting point, ordered stops, estimated distance and duration on the separate optimizer map.
+5. Choose a place category and **Nearby** or **Along route**, then submit the search. Nearby searches use the active route origin, or the manually selected origin when there is no route.
+6. Select a result to inspect it. The comparison action calculates driving detours for up to the first three results when a route exists. Without a route, conversational comparison reports only the available straight-line distances.
+7. Type a request, or start the normal Nova microphone while safely stopped. For reliable voice use, end the spoken request with English **Send** or **Submit**, for example **Hitech City Submit**. Hindi send words are experimental and not supported as a reliable microphone workflow. Map-only commands belong in the header’s Map voice mode; Nova does not interpret them as destination searches. Normal Nova controls, confirmation and draft behavior remain separate from Map voice.
+8. Give an explicit navigation request. If several addresses are returned, click an option or say **option two, Submit** / **विकल्प दो सबमिट**. Selecting a valid option confirms that requested navigation change and calculates the route immediately, without a second confirmation prompt. Option buttons remain usable while the list is spoken and stop playback before routing. Say **Skip**, **skip karo**, **chhod do**, or **छोड़ दो** to discard all current destination options and ask for a completely new destination without changing the active journey. Single-result proposals still accept **confirm route, Submit**, **confirm destination, Submit**, **yes, Submit**, or **cancel, Submit**. The microphone may reopen for a bounded 15-second follow-up; this recording limit does not expire the request. Choices and proposals have no time-based expiry, including beyond five minutes. Informational questions preserve them. Cancellation, Skip, clearing the navigation session, successful routing, or an explicit replacement navigation/place-search request can invalidate them. Normal microphone startup waits 400 ms after playback; Stop/hide/collapse cancel capture, not the retained address request. Spoken replies have replay/stop controls.
+9. For map-only controls, enable **Map voice** in the application header. Speak a command and pause for one second, or finish with **Send/Submit** for immediate execution. The live transcript appears beside the header button and clears after execution. Map voice is silent, automatically restarts after recognition endings, and remains active until disabled or stopped by a fatal browser permission/support error. Opening Nova disables it. **Allow interruptions** remains a separate normal-Nova feature.
 
 Interruption checklist: grant microphone permission and wait for **Listening** or **Speaking · Interruptible**, rather than **Starting microphone**. Recognized speech stops playback; only a finalized submission control sends the request. An option number alone does not submit a voice turn. Questions, negation and ambiguity retain all navigation guards. Clicking a destination option remains available during speech. Disabling continuous listening during playback stops capture without restarting or cancelling that reply.
 

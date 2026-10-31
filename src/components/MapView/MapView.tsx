@@ -7,11 +7,21 @@ import { AlertTriangle, Layers, LocateFixed, MapPin, Minus, Plus } from "lucide-
 import type { Location, MapCommand, NavigationSession, PlaceResult, RouteResult } from "@/types/domain";
 import { formatDistance, formatDuration } from "@/utils/geo";
 
-type Props = { session: NavigationSession; alternatives: RouteResult[]; userLocation: Location | null; places: PlaceResult[]; selected: PlaceResult | null; onSelect: (place: PlaceResult) => void; onLocate: () => void; mapCommand?: MapCommand | null };
+type Props = { session: NavigationSession; alternatives: RouteResult[]; userLocation: Location | null; places: PlaceResult[]; selected: PlaceResult | null; onSelect: (place: PlaceResult) => void; onLocate: () => void; mapCommand?: MapCommand | null; routeStops?: Location[] };
 
-function MapBehavior({ session, alternatives, userLocation, places, selected, onLocate, mapCommand }: Props) {
+type MapPoint = [number, number];
+
+function nearestRoutePoint(stop: Location, route: RouteResult): MapPoint {
+  return route.geometry.coordinates.reduce<MapPoint>((nearest, [lon, lat]) => {
+    const distance = (lat - stop.lat) ** 2 + (lon - stop.lon) ** 2;
+    const nearestDistance = (nearest[0] - stop.lat) ** 2 + (nearest[1] - stop.lon) ** 2;
+    return distance < nearestDistance ? [lat, lon] : nearest;
+  }, [route.geometry.coordinates[0][1], route.geometry.coordinates[0][0]]);
+}
+
+function MapBehavior({ session, alternatives, userLocation, places, selected, onLocate, mapCommand, routeStops }: Props) {
   const map = useMap();
-  const lastRevision = useRef(-1);
+  const lastRouteKey = useRef("");
   const lastPlaceIds = useRef("");
   const lastMapCommand = useRef(0);
 
@@ -22,12 +32,16 @@ function MapBehavior({ session, alternatives, userLocation, places, selected, on
   }, [map]);
 
   useEffect(() => {
-    if (session.route && session.revision !== lastRevision.current) {
-      lastRevision.current = session.revision;
-      const points = session.route.geometry.coordinates.map(([lon, lat]) => [lat, lon] as [number, number]);
+    const routeKey = session.route ? `${session.revision}:${(routeStops ?? []).map((stop) => stop.id).join(",")}` : "";
+    if (session.route && routeKey !== lastRouteKey.current) {
+      lastRouteKey.current = routeKey;
+      const points = [
+        ...session.route.geometry.coordinates.map(([lon, lat]) => [lat, lon] as MapPoint),
+        ...(routeStops ?? []).map((stop) => [stop.lat, stop.lon] as MapPoint),
+      ];
       map.fitBounds(latLngBounds(points), { padding: [55, 55], maxZoom: 15, animate: false });
     }
-  }, [map, session]);
+  }, [map, routeStops, session]);
 
   useEffect(() => {
     if (!alternatives.length || !session.route) return;
@@ -68,7 +82,10 @@ function MapBehavior({ session, alternatives, userLocation, places, selected, on
     <button className="map-button" title="Zoom in" aria-label="Zoom in" onClick={() => map.zoomIn()}><Plus size={19} /></button>
     <button className="map-button" title="Zoom out" aria-label="Zoom out" onClick={() => map.zoomOut()}><Minus size={19} /></button>
     <button className="map-button locate-map" title="Use current location" aria-label="Use current location" onClick={onLocate}><LocateFixed size={19} /></button>
-    {session.route && <button className="map-button" title="Fit route to map" aria-label="Fit route to map" onClick={() => map.fitBounds(latLngBounds(session.route!.geometry.coordinates.map(([lon, lat]) => [lat, lon])), { padding: [55, 55] })}><MapPin size={19} /></button>}
+    {session.route && <button className="map-button" title="Fit route to map" aria-label="Fit route to map" onClick={() => map.fitBounds(latLngBounds([
+      ...session.route!.geometry.coordinates.map(([lon, lat]) => [lat, lon] as MapPoint),
+      ...(routeStops ?? []).map((stop) => [stop.lat, stop.lon] as MapPoint),
+    ]), { padding: [55, 55] })}><MapPin size={19} /></button>}
   </div>;
 }
 
@@ -89,10 +106,12 @@ export default function MapView(props: Props) {
       {props.session.route && <>
         <Polyline positions={props.session.route.geometry.coordinates.map(([lon, lat]) => [lat, lon])} pathOptions={{ color: "#073b32", weight: 10, opacity: 0.6 }} />
         <Polyline positions={props.session.route.geometry.coordinates.map(([lon, lat]) => [lat, lon])} pathOptions={{ color: "#078e72", weight: 6, opacity: 1 }} />
+        {props.routeStops?.map((stop) => <Polyline key={`optimizer-access-${stop.id}`} positions={[[stop.lat, stop.lon], nearestRoutePoint(stop, props.session.route!)]} pathOptions={{ color: "#1689e5", weight: 3, opacity: 0.8, dashArray: "5 7" }} />)}
       </>}
       {props.session.origin && <CircleMarker center={[props.session.origin.lat, props.session.origin.lon]} radius={8} pathOptions={{ color: "#fff", fillColor: "#1689e5", fillOpacity: 1, weight: 3 }}><Popup>Origin: {props.session.origin.name}</Popup></CircleMarker>}
       {props.session.destination && <CircleMarker center={[props.session.destination.lat, props.session.destination.lon]} radius={9} pathOptions={{ color: "#fff", fillColor: "#dc455a", fillOpacity: 1, weight: 3 }}><Popup>Destination: {props.session.destination.name}</Popup></CircleMarker>}
       {props.userLocation && <CircleMarker center={[props.userLocation.lat, props.userLocation.lon]} radius={6} pathOptions={{ color: "#fff", fillColor: "#1689e5", fillOpacity: 1, weight: 2 }}><Tooltip>Current location · one-time fix</Tooltip></CircleMarker>}
+      {props.routeStops?.map((stop, index) => <CircleMarker key={`optimized-stop-${stop.id}`} center={[stop.lat, stop.lon]} radius={14} pathOptions={{ color: "#fff", fillColor: index === 0 ? "#1689e5" : "#27d9f2", fillOpacity: 1, weight: 3 }}><Tooltip permanent direction="center" className="optimizer-stop-label">{index + 1}</Tooltip><Popup><strong>Stop {index + 1}</strong><p>{stop.name}</p></Popup></CircleMarker>)}
       {props.places.map((place, index) => <CircleMarker key={place.id} center={[place.lat, place.lon]} radius={props.selected?.id === place.id ? 12 : 9} pathOptions={{ color: props.selected?.id === place.id ? "#111e1b" : "#fff", fillColor: "#eea32c", fillOpacity: 1, weight: 2 }} eventHandlers={{ click: () => props.onSelect(place) }}><Tooltip>{index + 1}. {place.name}</Tooltip><Popup><strong>{index + 1}. {place.name}</strong><p>{place.address || "Address: Not available"}</p></Popup></CircleMarker>)}
       <MapBehavior {...props} />
     </MapContainer>
