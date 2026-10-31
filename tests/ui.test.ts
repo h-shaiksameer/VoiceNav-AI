@@ -9,6 +9,7 @@ import { ServiceStatus } from "@/components/ServiceStatus";
 import { useNavigationApp } from "@/components/useNavigationApp";
 import { serviceAvailability } from "@/services/availability";
 import { ConversationEngine } from "@/conversation/ConversationEngine";
+import { emptyContext } from "@/conversation/ConversationContext";
 import { NavigationController } from "@/navigation/NavigationController";
 import type { Location, PlaceResult, RouteResult } from "@/types/domain";
 
@@ -169,4 +170,22 @@ test("Allow interruptions displays words, discards drafts, submits turns and sur
   act(() => fireEvent.click(view.getByLabelText("Allow interruptions")));
   assert.equal((view.getByLabelText("Allow interruptions") as HTMLInputElement).checked, false);
   assert.ok(released >= 2);
+});
+
+test("normal voice mode reopens the microphone after Nova asks for a destination option", async (context) => {
+  const window = browser(context);
+  Object.assign(window, { SpeechRecognition: Recognition });
+  const choices = [{ id: "place:one", name: "First place", lat: 1, lon: 2 }, { id: "place:two", name: "Second place", lat: 1.1, lon: 2.1 }];
+  const snapshot = { ...emptyContext(), pendingLocationChoices: choices };
+  const engine = { subscribe: () => () => {}, getSnapshot: () => snapshot, getSpokenText: (text: string) => text, send: async () => "I found two options. Say the option." } as unknown as ConversationEngine;
+  const view = render(createElement(VoiceAssistant, { engine, blocked: false, onBusyChange: () => {} }));
+  const firstRecognition = Recognition.latest;
+  await act(async () => { fireEvent.click(view.getByRole("button", { name: "Start voice input" })); });
+  await act(async () => {
+    firstRecognition.onresult?.({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: "Navigate to Oxford Send" } }] });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  });
+  assert.equal(engine.getSnapshot().pendingLocationChoices.length, 2);
+  assert.notStrictEqual(Recognition.latest, firstRecognition);
+  assert.equal(view.getByRole("button", { name: "Stop recording and keep draft" }) !== null, true);
 });

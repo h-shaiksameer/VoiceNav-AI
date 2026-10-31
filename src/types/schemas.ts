@@ -20,7 +20,7 @@ export const placesRequestSchema = z.object({
   geometry: geometrySchema.optional(),
 }).refine((value) => value.scope !== "route" || !!value.geometry, "An active route is required.");
 export const intentSchema = z.object({
-  type: z.enum(["GET_ETA", "GET_ROUTE_DISTANCE", "GET_TRAFFIC", "GET_ROUTE_ALTERNATIVES", "PLAN_ROUTE", "SEARCH_NEARBY", "SEARCH_ALONG_ROUTE", "COMPARE_OPTIONS", "GET_PLACE_DETAILS", "CHANGE_DESTINATION", "STOP_NAVIGATION", "CLARIFY"]),
+  type: z.enum(["GET_ETA", "GET_ROUTE_DISTANCE", "GET_DISTANCE_BETWEEN", "GET_TRAFFIC", "GET_ROUTE_ALTERNATIVES", "PLAN_ROUTE", "SEARCH_NEARBY", "SEARCH_ALONG_ROUTE", "COMPARE_OPTIONS", "GET_PLACE_DETAILS", "CHANGE_DESTINATION", "STOP_NAVIGATION", "CLARIFY"]),
   category: categorySchema.optional(),
   reference: z.number().int().min(0).max(11).optional(),
   query: z.string().max(300).optional(),

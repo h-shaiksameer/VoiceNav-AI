@@ -425,7 +425,7 @@ export function startMicrophoneInterruption(callbacks: Parameters<typeof startVo
       });
       if (cancelled || fallbackStarted) { stopTrackRecognition(); return; }
       stop = stopTrackRecognition;
-      if (!receivedResult) captureDeadline = setTimeout(startNativeMicrophone, 6000);
+      if (!receivedResult) captureDeadline = setTimeout(startNativeMicrophone, 2000);
     }).catch((error: unknown) => {
       if (error instanceof DOMException && ["NotAllowedError", "SecurityError"].includes(error.name)) fail(recognitionMessages.permission);
       else startNativeMicrophone();

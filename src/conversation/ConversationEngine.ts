@@ -249,6 +249,10 @@ export class ConversationEngine {
         case "GET_ROUTE_DISTANCE":
           response = session.route ? this.say(`The current driving route is ${formatDistance(session.route.distanceMeters)}. Your destination is unchanged.`, `रास्ते की दूरी ${this.distance(session.route.distanceMeters)} है। मंज़िल नहीं बदली है।`) : this.say("Calculate a route first to see its distance.", "दूरी बताने के लिए पहले रास्ता बनाइए।");
           break;
+        case "GET_DISTANCE_BETWEEN":
+          if (!intent.originQuery || !intent.query) throw new Error("Give both locations to measure their distance.");
+          response = await this.distanceBetweenLocations(intent.originQuery, intent.query, session.revision);
+          break;
         case "GET_TRAFFIC":
           response = this.say("Live traffic is not available. OSRM estimates do not account for current congestion or road closures.", "लाइव ट्रैफिक की जानकारी उपलब्ध नहीं है। समय के अनुमान में मौजूदा जाम या बंद सड़कें शामिल नहीं हैं।");
           break;
@@ -319,5 +323,19 @@ export class ConversationEngine {
       this.reply(error instanceof Error ? error.message : "The request could not be completed. Your route is unchanged.");
       throw error;
     } finally { this.busy = false; }
+  }
+
+  private async distanceBetweenLocations(originQuery: string, destinationQuery: string, revision: number): Promise<string> {
+    const session = this.navigation.getSnapshot();
+    const reference = session.origin ?? this.callbacks.getReferenceLocation() ?? undefined;
+    const origins = await this.services.searchLocations(originQuery, reference);
+    if (!origins.length) return this.say(`I could not find ${originQuery}. Your current route and destination are unchanged.`, `${originQuery} नहीं मिला। आपका मौजूदा रास्ता और मंज़िल वही हैं।`);
+    const origin = origins[0];
+    const destinations = await this.services.searchLocations(destinationQuery, origin);
+    if (!destinations.length) return this.say(`I could not find ${destinationQuery}. Your current route and destination are unchanged.`, `${destinationQuery} नहीं मिला। आपका मौजूदा रास्ता और मंज़िल वही हैं।`);
+    const destination = destinations[0];
+    const route = await this.services.requestRoute([origin, destination]);
+    if (this.navigation.getSnapshot().revision !== revision) throw new Error("Your journey changed while checking that distance. Please ask again.");
+    return this.say(`The driving distance between ${origin.name} and ${destination.name} is ${formatDistance(route.distanceMeters)}, with an estimated driving time of ${formatDuration(route.durationSeconds)}. Your current route and destination are unchanged.`, `${origin.name} और ${destination.name} के बीच ड्राइविंग दूरी ${this.distance(route.distanceMeters)} है और अनुमानित समय ${this.duration(route.durationSeconds)} है। आपका मौजूदा रास्ता और मंज़िल वही हैं।`);
   }
 }

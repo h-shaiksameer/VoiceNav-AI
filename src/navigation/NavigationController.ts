@@ -1,4 +1,4 @@
-import type { Coordinates, NavigationAction, NavigationSession, RouteResult } from "@/types/domain";
+import type { Coordinates, Location, NavigationAction, NavigationSession, RouteResult } from "@/types/domain";
 import { locationSchema, navigationActionSchema, routeSchema } from "@/types/schemas";
 import { ambiguousReference, destinationInstruction, routeInstruction, stopInstruction } from "./commands";
 import { emptySession } from "./NavigationSession";
@@ -46,7 +46,53 @@ export class NavigationController {
     const requestId = ++this.requestId;
     const route = routeSchema.parse(await this.routeService([origin, destination]));
     if (requestId !== this.requestId) throw new Error("This request was superseded. The latest navigation choice has been kept.");
-    this.publish({ revision: this.session.revision + 1, status: "preview", origin, destination, route });
+      this.publish({ revision: this.session.revision + 1, status: "ready", origin, destination, route });
+    return this.session;
+  }
+
+  async recalculateJourney(origin: Location): Promise<NavigationSession> {
+    if (!this.session.destination || !this.session.route || !["active", "paused"].includes(this.session.status)) throw new Error("An active or paused journey is required to recalculate.");
+    const requestId = ++this.requestId;
+    const route = routeSchema.parse(await this.routeService([origin, this.session.destination]));
+    if (requestId !== this.requestId) throw new Error("This recalculation was superseded by a newer navigation request.");
+    this.publish({ ...this.session, revision: this.session.revision + 1, origin, route });
+    return this.session;
+  }
+
+  startJourney(): NavigationSession {
+    if (!this.session.route || !this.session.origin || !this.session.destination) throw new Error("Calculate a route before starting a journey.");
+    if (this.session.status !== "ready" && this.session.status !== "paused") throw new Error("This journey is not ready to start.");
+    this.publish({ ...this.session, status: "starting" });
+    return this.session;
+  }
+
+  activateJourney(): NavigationSession {
+    if (this.session.status !== "starting") throw new Error("A journey must be starting before it becomes active.");
+    this.publish({ ...this.session, status: "active" });
+    return this.session;
+  }
+
+  pauseJourney(): NavigationSession {
+    if (this.session.status !== "active") throw new Error("Only an active journey can be paused.");
+    this.publish({ ...this.session, status: "paused" });
+    return this.session;
+  }
+
+  resumeJourney(): NavigationSession {
+    if (this.session.status !== "paused") throw new Error("Only a paused journey can be resumed.");
+    this.publish({ ...this.session, status: "active" });
+    return this.session;
+  }
+
+  endJourney(): NavigationSession {
+    if (!["ready", "starting", "active", "paused", "arrived", "error"].includes(this.session.status)) throw new Error("There is no journey to end.");
+    this.publish({ ...this.session, status: "stopped" });
+    return this.session;
+  }
+
+  markArrived(): NavigationSession {
+    if (this.session.status !== "active") throw new Error("Only an active journey can arrive.");
+    this.publish({ ...this.session, status: "arrived" });
     return this.session;
   }
 }

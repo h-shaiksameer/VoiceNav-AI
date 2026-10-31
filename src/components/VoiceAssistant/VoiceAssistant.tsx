@@ -137,10 +137,10 @@ export function VoiceAssistant({ engine, blocked, onBusyChange }: { engine: Conv
       initialTranscript: liveDraft.current,
       keepAlive: true,
       language: engine.getSnapshot().language === "hi" ? "hi-IN" : "en-IN",
-      onCaptureFallback: (message) => {
+      onCaptureFallback: () => {
         microphoneReady.current = false;
         setInterruptionReady(false);
-        setError(message);
+        setError("");
       },
       onReady: () => {
         if (!interruptionEnabled.current || !panelOpen.current || document.hidden) return;
@@ -261,7 +261,7 @@ export function VoiceAssistant({ engine, blocked, onBusyChange }: { engine: Conv
 
   function listen(followup = false) {
     if (!followup && state === "listening") { stopVoice(); return; }
-    if (blocked || (state === "processing" && !followup) || !panelOpen.current || document.hidden) return;
+    if ((blocked && !followup) || (state === "processing" && !followup) || !panelOpen.current || document.hidden) return;
     if (interruptionEnabled.current) { interruptReply(); armInterruption(); return; }
     if (replyActive.current) playbackStoppedAt.current = Date.now();
     voiceConversation.current = true;

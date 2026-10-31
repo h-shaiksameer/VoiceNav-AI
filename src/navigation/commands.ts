@@ -130,3 +130,12 @@ export function contextualReference(text: string, context: ConversationContext):
   }
   return context.recentPlaces.length === 1 ? 0 : undefined;
 }
+
+export function distanceBetweenInstruction(text: string): { originQuery: string; query: string } | null {
+  const clean = normalizeLanguage(text).replace(/[.!?]+$/, "").trim();
+  const match = clean.match(/^(?:(?:please|kindly) )?(?:(?:what is|what's|calculate|check|find|tell me|give me) )?(?:the )?(?:driving )?(?:distance|how far) between (.+?) and (.+)$/i);
+  if (!match || /[?!;]/.test(`${match[1]} ${match[2]}`)) return null;
+  const originQuery = match[1].trim();
+  const query = match[2].trim();
+  return originQuery && query ? { originQuery, query } : null;
+}

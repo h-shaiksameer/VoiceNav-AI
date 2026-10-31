@@ -10,6 +10,17 @@ const responseSchema = z.array(z.object({
   address: z.object({ country_code: countryCodeSchema.optional() }).optional(),
 }));
 
+function phoneticQueries(query: string): string[] {
+  const bases = [query, query.replace(/(.)\1+/g, "$1")];
+  const variants = new Set(bases);
+  for (const base of bases) {
+    for (const [from, to] of [["kh", "q"], ["q", "kh"], ["oo", "u"], ["u", "oo"], ["ph", "f"], ["f", "ph"]] as const) {
+      if (base.toLowerCase().includes(from)) variants.add(base.replace(new RegExp(from, "gi"), to));
+    }
+  }
+  return [...variants].slice(0, 5);
+}
+
 async function countryAt(reference: Coordinates, identity: string): Promise<string> {
   return cached(`country:${reference.lat}:${reference.lon}`, 86_400_000, () => serializedGeocode(async () => {
     const url = new URL("reverse", `${(process.env.NOMINATIM_BASE_URL || "https://nominatim.openstreetmap.org").replace(/\/$/, "")}/`);
@@ -23,11 +34,15 @@ async function countryAt(reference: Coordinates, identity: string): Promise<stri
 export async function geocode(query: string, identity: string, reference?: Coordinates, countryCode?: string): Promise<Location[]> {
   const country = countryCode ?? (reference ? await countryAt(reference, identity) : undefined);
   return cached(`geocode:v2:${country ?? "all"}:${query.toLowerCase()}`, 86_400_000, () => serializedGeocode(async () => {
-    const url = new URL("search", `${(process.env.NOMINATIM_BASE_URL || "https://nominatim.openstreetmap.org").replace(/\/$/, "")}/`);
-    const params = new URLSearchParams({ q: query, format: "jsonv2", limit: "5", addressdetails: "1", "accept-language": "en" });
-    if (country) params.set("countrycodes", country);
-    url.search = params.toString();
-    const results = responseSchema.parse(await upstream(url, identity));
-    return results.filter((item) => !country || item.address?.country_code === country).map((item) => ({ id: item.osm_type && item.osm_id ? `osm:${item.osm_type}:${item.osm_id}` : `nominatim:${item.place_id}`, lat: item.lat, lon: item.lon, name: item.display_name, countryCode: item.address?.country_code }));
+    const baseUrl = `${(process.env.NOMINATIM_BASE_URL || "https://nominatim.openstreetmap.org").replace(/\/$/, "")}/`;
+    for (const candidate of phoneticQueries(query)) {
+      const url = new URL("search", baseUrl);
+      const params = new URLSearchParams({ q: candidate, format: "jsonv2", limit: "5", addressdetails: "1", "accept-language": "en" });
+      if (country) params.set("countrycodes", country);
+      url.search = params.toString();
+      const results = responseSchema.parse(await upstream(url, identity)).filter((item) => !country || item.address?.country_code === country);
+      if (results.length) return results.map((item) => ({ id: item.osm_type && item.osm_id ? `osm:${item.osm_type}:${item.osm_id}` : `nominatim:${item.place_id}`, lat: item.lat, lon: item.lon, name: item.display_name, countryCode: item.address?.country_code }));
+    }
+    return [];
   }));
 }
