@@ -5,6 +5,7 @@ import { LocalIntentProvider } from "@/ai/providers/LocalIntentProvider";
 import { detectLanguage, hindiChoice, hindiConfirmation, hindiDestination, hindiNegation, hindiReferenceText, hindiRoute, hindiStop, normalizeHindi } from "@/ai/language";
 import { emptyContext } from "@/conversation/ConversationContext";
 import { ambiguousReference, contextualReference, currentLocationReference, destinationInstruction, lastOptionIndex, referenceIndex, routeInstruction, stopInstruction } from "@/navigation/commands";
+import { parseUiControlCommand } from "@/navigation/uiControl";
 import { categoryLabel, matchingCategories } from "@/utils/categories";
 import { distanceBetween, formatDistance, formatDuration, validCoordinates } from "@/utils/geo";
 
@@ -43,6 +44,33 @@ test("navigation command helpers cover labelled, reverse, negative, and contextu
   assert.equal(destinationInstruction("Navigate to A or B"), null);
   assert.equal(stopInstruction("Please stop my route"), true);
   assert.equal(stopInstruction("Don't stop navigation"), false);
+  assert.deepEqual(parseUiControlCommand("zoom in"), { action: "zoom-in", amount: 1 });
+  assert.deepEqual(parseUiControlCommand("zoom out 2 levels"), { action: "zoom-out", amount: 2 });
+  assert.deepEqual(parseUiControlCommand("Zoomin"), { action: "zoom-in", amount: 1 });
+  assert.deepEqual(parseUiControlCommand("ZoooomIn"), { action: "zoom-in", amount: 1 });
+  assert.deepEqual(parseUiControlCommand("zooom in 3"), { action: "zoom-in", amount: 3 });
+  assert.deepEqual(parseUiControlCommand("zoom out by level 2"), { action: "zoom-out", amount: 2 });
+  assert.deepEqual(parseUiControlCommand("zoom in three levels"), { action: "zoom-in", amount: 3 });
+  assert.deepEqual(parseUiControlCommand("zoom in zoom out zoom in zooom out at Hyderabad"), { action: "zoom-out", amount: 1, query: "Hyderabad" });
+  assert.deepEqual(parseUiControlCommand("zoomin on the map at Hyderabad"), { action: "zoom-in", amount: 1, query: "Hyderabad" });
+  assert.deepEqual(parseUiControlCommand("zom Hyderabad"), { action: "zoom-in", amount: 1, query: "Hyderabad" });
+  assert.deepEqual(parseUiControlCommand("zoom Hyderabad"), { action: "zoom-in", amount: 1, query: "Hyderabad" });
+  assert.deepEqual(parseUiControlCommand("zoom at Hyderabad"), { action: "zoom-in", amount: 1, query: "Hyderabad" });
+  assert.deepEqual(parseUiControlCommand("move map left"), { action: "pan-left", amount: 1 });
+  assert.deepEqual(parseUiControlCommand("moove right"), { action: "pan-right", amount: 1 });
+  assert.deepEqual(parseUiControlCommand("move right 3"), { action: "pan-right", amount: 3 });
+  assert.deepEqual(parseUiControlCommand("move left by level 2"), { action: "pan-left", amount: 2 });
+  assert.deepEqual(parseUiControlCommand("pan right 4 levels"), { action: "pan-right", amount: 4 });
+  assert.deepEqual(parseUiControlCommand("move right one"), { action: "pan-right", amount: 1 });
+  assert.deepEqual(parseUiControlCommand("move left tree levels"), { action: "pan-left", amount: 3 });
+  assert.deepEqual(parseUiControlCommand("please move the map upwards now"), { action: "pan-up", amount: 1 });
+  assert.deepEqual(parseUiControlCommand("move down"), { action: "pan-down", amount: 1 });
+  assert.deepEqual(parseUiControlCommand("shift the view down"), { action: "pan-down", amount: 1 });
+  assert.deepEqual(parseUiControlCommand("up"), { action: "pan-up", amount: 1 });
+  assert.deepEqual(parseUiControlCommand("please move the screen down now"), { action: "pan-down", amount: 1 });
+  assert.deepEqual(parseUiControlCommand("center map on Hyderabad"), { action: "center", query: "Hyderabad" });
+  assert.deepEqual(parseUiControlCommand("reset map"), { action: "reset" });
+  assert.equal(parseUiControlCommand("pan to Hyderabad"), null);
   assert.equal(lastOptionIndex("choose option 12"), 11);
   assert.equal(lastOptionIndex("which option?"), undefined);
   assert.equal(referenceIndex("result 3"), 2);
@@ -57,6 +85,7 @@ test("local intent and utility helpers cover uncommon categories and geometry bo
   for (const phrase of ["Mereko traffic batao", "Mereko doosra rasta dikhao", "Mereko compare batao", "Mereko route ki jaankari batao", "Mereko raste mein cafe dikhao", "Are there any?"]) {
     assert.ok((await provider.process({ text: phrase, context: emptyContext(), session: { revision: 0, status: "idle", origin: null, destination: null, route: null } })).type);
   }
+  assert.equal((await provider.process({ text: "zoom out at Hyderabad", context: emptyContext(), session: { revision: 0, status: "idle", origin: null, destination: null, route: null } })).type, "CLARIFY");
   const processor = new IntentProcessor();
   assert.equal((await processor.process({ text: "Find restaurants or petrol stations", context: emptyContext(), session: { revision: 0, status: "idle", origin: null, destination: null, route: null } })).type, "CLARIFY");
   assert.equal(matchingCategories("fuel food hospital pharmacy atm parking coffee charging").length, 8);

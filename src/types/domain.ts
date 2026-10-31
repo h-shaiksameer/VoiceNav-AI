@@ -23,6 +23,7 @@ export type NavigationSession = {
   destination: Location | null;
   route: RouteResult | null;
 };
+export type MapCommand = { id: number; action: "zoom-in" | "zoom-out" | "reset" | "center" | "pan-left" | "pan-right" | "pan-up" | "pan-down"; amount?: number; location?: Location };
 export type AssistantQueryStatus = "idle" | "running" | "complete" | "cancelled" | "error";
 export type AssistantQuerySnapshot = {
   requestId: number;
@@ -35,7 +36,7 @@ export type AssistantQuerySnapshot = {
 export type UserMessage = { id: string; role: "user"; text: string };
 export type AssistantMessage = { id: string; role: "assistant"; text: string; spokenText?: string };
 export type Message = UserMessage | AssistantMessage;
-export type IntentType = "GET_ETA" | "GET_ROUTE_DISTANCE" | "GET_DISTANCE_BETWEEN" | "GET_TRAFFIC" | "GET_ROUTE_ALTERNATIVES" | "PLAN_ROUTE" | "SEARCH_NEARBY" | "SEARCH_ALONG_ROUTE" | "COMPARE_OPTIONS" | "GET_PLACE_DETAILS" | "CHANGE_DESTINATION" | "STOP_NAVIGATION" | "CLARIFY";
+export type IntentType = "GET_ETA" | "GET_ROUTE_DISTANCE" | "GET_DISTANCE_BETWEEN" | "GET_TRAFFIC" | "GET_ROUTE_ALTERNATIVES" | "PLAN_ROUTE" | "SEARCH_NEARBY" | "SEARCH_ALONG_ROUTE" | "COMPARE_OPTIONS" | "GET_PLACE_DETAILS" | "CHANGE_DESTINATION" | "STOP_NAVIGATION" | "MAP_ZOOM" | "CLARIFY";
 export type Intent = {
   type: IntentType;
   category?: PlaceCategory;
@@ -43,6 +44,7 @@ export type Intent = {
   query?: string;
   originQuery?: string;
   clarification?: string;
+  mapAction?: "zoom-in" | "zoom-out" | "reset" | "center" | "pan-left" | "pan-right" | "pan-up" | "pan-down";
 };
 export type NavigationAction =
   | { type: "SET_ROUTE"; origin: Location; destination: Location }
@@ -65,6 +67,7 @@ export type ConversationContext = {
   pendingDestination: Location | null;
   pendingOrigin: Location | null;
   pendingLocationChoices: Location[];
+  pendingMapAction: "zoom-in" | "zoom-out" | "center" | null;
   pendingSourceText: string | null;
   pendingRevision: number | null;
 };

@@ -191,6 +191,30 @@ test("normal voice mode reopens the microphone after Nova asks for a destination
   assert.equal(view.getByRole("button", { name: "Stop recording and keep draft" }) !== null, true);
 });
 
+test("map voice owns a separate microphone turn and does not send navigation text", async (context) => {
+  const window = browser(context);
+  Object.assign(window, { SpeechRecognition: Recognition });
+  const commands: string[] = [];
+  const snapshot = emptyContext();
+  const engine = { subscribe: () => () => {}, getSnapshot: () => snapshot, getSpokenText: (text: string) => text, clearUiControl: () => {}, executeUiControl: async (text: string) => { commands.push(text); return "Map control applied."; }, send: async () => { throw new Error("Navigation send must not run"); } } as unknown as ConversationEngine;
+  const view = render(createElement(VoiceAssistant, { engine, blocked: false, onBusyChange: () => {} }));
+  fireEvent.click(view.getByRole("button", { name: "Collapse assistant" }));
+  await act(async () => { fireEvent.click(view.getByRole("button", { name: /Map voice disabled/i })); });
+  assert.ok(view.getByRole("button", { name: /Map voice enabled/i }));
+  const recognition = Recognition.latest;
+  assert.ok(recognition);
+  await act(async () => {
+    recognition.onresult?.({ resultIndex: 0, results: [{ isFinal: false, 0: { transcript: "move right" } }] });
+  });
+  assert.ok(view.getByRole("status", { name: "move right" }));
+  await act(async () => {
+    recognition.onresult?.({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: "zoom in submit" } }] });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  });
+  assert.deepEqual(commands, ["zoom in"]);
+  assert.ok(view.getByRole("button", { name: /Map voice enabled/i }));
+});
+
 test("map sessions open from the hamburger and support create, switch and delete", (context) => {
   browser(context);
   const view = render(createElement(Dashboard));

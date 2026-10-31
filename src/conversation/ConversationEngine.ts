@@ -1,4 +1,4 @@
-import type { ConversationContext, DetourResult, Location, PlaceCategory, PlaceResult, RouteResult } from "@/types/domain";
+import type { ConversationContext, DetourResult, Location, MapCommand, PlaceCategory, PlaceResult, RouteResult } from "@/types/domain";
 import { NavigationController } from "@/navigation/NavigationController";
 import { IntentProcessor } from "@/ai/IntentProcessor";
 import { categoryLabel } from "@/utils/categories";
@@ -9,6 +9,7 @@ import { locationSchema } from "@/types/schemas";
 import { detectLanguage, hindiConfirmation, type AssistantLanguage } from "@/ai/language";
 import { addMessage, clearPendingNavigation, emptyContext } from "./ConversationContext";
 import { defaultConversationServices, type ConversationServices } from "./ConversationServices";
+import { parseUiControlCommand } from "@/navigation/uiControl";
 
 export type PlaceSearch = { category: PlaceCategory; scope: "nearby" | "route"; places: PlaceResult[] };
 type Callbacks = {
@@ -19,6 +20,7 @@ type Callbacks = {
   getReferenceLocation: () => Location | null;
   getCurrentLocation?: () => Promise<Location>;
   onCurrentLocation?: (location: Location) => void;
+  onMapCommand?: (command: Omit<MapCommand, "id">) => void;
 };
 
 export class ConversationEngine {
@@ -64,6 +66,10 @@ export class ConversationEngine {
   private distance(meters: number): string { return this.context.language === "hi" ? formatDistance(meters).replace(/km/g, "किलोमीटर").replace(/m/g, "मीटर") : formatDistance(meters); }
   private shortLocationName(location: Location): string { return location.name.trim().split(/\s+/u).slice(0, 3).join(" "); }
   private clearPending() { this.update(clearPendingNavigation(this.context)); }
+
+  clearUiControl(): void {
+    if (this.context.pendingMapAction) this.clearPending();
+  }
 
   resetNavigationContext(): void {
     this.update(clearPendingNavigation({ ...this.context, recentPlaces: [], selectedPlaceId: null, lastSearchScope: null }));
@@ -133,6 +139,41 @@ export class ConversationEngine {
     return this.say(`I found ${alternatives.length} other driving ${alternatives.length === 1 ? "route" : "routes"}. ${summaries.join(". ")}. These are previews without live traffic. Your current route and destination are unchanged.`, `${alternatives.length} दूसरे रास्ते मिले हैं। ${alternatives.map((route, index) => `विकल्प ${index + 1}: ${this.duration(route.durationSeconds)}, ${this.distance(route.distanceMeters)}`).join("। ")}। ये लाइव ट्रैफिक के बिना प्रीव्यू हैं। आपका रास्ता और मंज़िल नहीं बदले हैं।`);
   }
 
+  private mapChoicesText(choices: Location[]): string {
+    const names = choices.map((location, index) => `Option ${index + 1}: ${location.name}`).join(". ");
+    return `I found ${choices.length} places matching that map location. ${names}. Say the option number to move the map there.`;
+  }
+
+  async executeUiControl(text: string): Promise<string> {
+    const selectedOption = lastOptionIndex(text);
+    if (this.context.pendingMapAction && selectedOption !== undefined) {
+      if (selectedOption >= 0 && selectedOption < this.context.pendingLocationChoices.length) return this.selectMapLocation(selectedOption);
+      return "That was not one of the listed map locations. Say an option number.";
+    }
+    if (this.context.pendingMapAction) this.clearPending();
+    const command = parseUiControlCommand(text);
+    if (!command) return "I can control the map with zoom, pan, move, center, or reset commands. The navigation assistant is unchanged.";
+    if (!command.query) {
+      this.callbacks.onMapCommand?.({ action: command.action, amount: command.amount });
+      return "Map control applied. Your route and destination are unchanged.";
+    }
+    const matches = await this.services.searchLocations(command.query, this.navigation.getSnapshot().origin ?? this.callbacks.getReferenceLocation() ?? undefined);
+    if (!matches.length) return `I could not find ${command.query}. The map has not moved.`;
+    const reference = this.navigation.getSnapshot().origin ?? this.callbacks.getReferenceLocation() ?? undefined;
+    const nearestFirst = [...matches].sort((first, second) => reference ? distanceBetween(first, reference) - distanceBetween(second, reference) : 0);
+    if ((command.action === "zoom-in" || command.action === "zoom-out") && nearestFirst.length > 1) {
+      this.callbacks.onMapCommand?.({ action: command.action, amount: command.amount, location: nearestFirst[0] });
+      return `Moved the map to the nearest ${nearestFirst[0].name}. Your route and destination are unchanged.`;
+    }
+    if (matches.length > 1) {
+      const action = command.action === "center" || command.action === "zoom-in" || command.action === "zoom-out" ? command.action : "center";
+      this.update({ ...this.context, pendingLocationChoices: matches.slice(0, 5), pendingMapAction: action, pendingDestination: null, pendingOrigin: null, pendingSourceText: null, pendingRevision: this.navigation.getSnapshot().revision });
+      return this.mapChoicesText(matches.slice(0, 5));
+    }
+    this.callbacks.onMapCommand?.({ action: command.action, amount: command.amount, location: matches[0] });
+    return `Moved the map to ${matches[0].name}. Your route and destination are unchanged.`;
+  }
+
   private propose(destination: Location, sourceText: string, expectedRevision: number, origin: Location | null = null): string {
     if (!destinationInstruction(sourceText) && !routeInstruction(sourceText)) throw new Error("An explicit navigation instruction is required.");
     const session = this.navigation.getSnapshot();
@@ -185,10 +226,21 @@ export class ConversationEngine {
     this.propose(destination, pendingSourceText, pendingRevision, pendingOrigin);
   }
 
+  private selectMapLocation(index: number): string {
+    const { pendingLocationChoices, pendingMapAction } = this.context;
+    const location = pendingLocationChoices[index];
+    if (!location || !pendingMapAction) throw new Error("That option is not in the current map location choices.");
+    const action = pendingMapAction;
+    this.clearPending();
+    this.callbacks.onMapCommand?.({ action, location });
+    return `Moved the map to ${location.name} and zoomed ${action === "zoom-in" ? "in" : "out"}.`;
+  }
+
   async chooseLocation(index: number): Promise<string> {
     if (this.busy) throw new Error("Please wait for the current request to finish.");
     this.busy = true;
     try {
+      if (this.context.pendingMapAction) return this.selectMapLocation(index);
       this.selectLocation(index);
       return await this.commitPending();
     } finally { this.busy = false; }
@@ -217,6 +269,10 @@ export class ConversationEngine {
 
   async send(text: string): Promise<string> {
     if (this.busy) throw new Error("Please wait for the current request to finish.");
+    if (this.context.pendingMapAction) {
+      this.clearPending();
+      return "";
+    }
     const request = normalizeLanguage(voiceRequest(text) ?? text);
     const selectedOption = lastOptionIndex(request);
     const clean = request.slice(0, 500);

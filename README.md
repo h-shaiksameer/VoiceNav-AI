@@ -2,6 +2,19 @@
 
 A voice-first navigation dashboard built with Next.js App Router, TypeScript, React, Tailwind CSS, Leaflet, and OpenStreetMap services.
 
+## Voice map controls
+
+Nova has a dedicated **map voice** mode for map-only commands. The **Map voice: Disabled/Enabled** button is in the application header, outside the Nova conversation panel. Enabling it stops normal Nova listening and keeps map voice active across command cycles. Speak one or more map commands, then say **Send** or **Submit**; Nova executes the final command immediately before that phrase, speaks the result, and resumes listening. Press the header button again to disable it. The shared microphone lock prevents both modes from listening at the same time.
+
+Supported commands include:
+
+- **zoom in**, **zoom out**, **zoom in 3 levels**, or **zoom out 2 levels** to change the current map view.
+- **zoom at Hyderabad**, **zoom out near Hyderabad**, **move map to Hyderabad**, or **center map on Hyderabad** to move the visual map center. Ambiguous locations are presented as map voice options.
+- **move map left**, **move map right**, **move map up**, or **move map down** to pan the active map/session.
+- **reset map** to restore the original map center and zoom.
+
+Map voice actions never set a navigation destination, change the origin, update GPS state, calculate a route, or modify the active journey. Each map session maintains its own viewport command state. Unsupported speech receives a map voice explanation instead of falling back to destination search.
+
 ## No Model Accounts Or Keys Required
 
 The application uses a **local, deterministic English, Hindi and Hinglish intent algorithm** by default, including common Deccani Hindi wording. It runs in the browser, needs no AI provider, and does not send conversation text to a model. There is no Meta integration, no required model account, and no model credential configuration. The generic adapter interface remains replaceable, but no external model is configured or called. If a future optional adapter fails or returns invalid data, the intent processor falls back to the local algorithm.

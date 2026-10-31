@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 import type { PlaceSearch } from "@/conversation/ConversationEngine";
-import type { DetourResult, Location, LocationTrackingStatus, PlaceCategory, PlaceResult, RouteResult, TrackedLocation } from "@/types/domain";
+import type { DetourResult, Location, LocationTrackingStatus, MapCommand, PlaceCategory, PlaceResult, RouteResult, TrackedLocation } from "@/types/domain";
 import { requestCurrentLocation } from "@/services/geolocation";
 import { LocationTrackingService } from "@/services/LocationTrackingService";
 import { MovementDetectionService, type MovementState } from "@/services/MovementDetectionService";
@@ -23,6 +23,7 @@ export function useNavigationApp() {
   const [selected, setSelected] = useState<PlaceResult | null>(null);
   const [detours, setDetours] = useState<DetourResult[]>([]);
   const [alternatives, setAlternatives] = useState<RouteResult[]>([]);
+  const [mapCommand, setMapCommand] = useState<MapCommand | null>(null);
   const [category, setCategory] = useState<PlaceCategory>("fuel");
   const [scope, setScope] = useState<"nearby" | "route">("nearby");
   const [busy, setBusy] = useState(false);
@@ -46,6 +47,7 @@ export function useNavigationApp() {
     onDetours: setDetours,
     onAlternatives: setAlternatives,
     onCurrentLocation: setUserLocation,
+    onMapCommand: (command) => setMapCommand((current) => ({ ...command, id: (current?.id ?? 0) + 1 })),
   }));
   const [tracking] = useState(() => new LocationTrackingService({
     onLocation: (location) => {
@@ -152,7 +154,7 @@ export function useNavigationApp() {
 
   return {
     origin, destination, session, userLocation, trackedLocation: ["active", "paused"].includes(session.status) ? trackedLocation : null, trackingStatus, movement, progress: ["active", "paused"].includes(session.status) ? progress : null, offRoute: ["active", "paused"].includes(session.status) && offRouteReadings >= 2, search, selected, detours, alternatives, category, scope, parallelAssistantSnapshot, parallelAssistant,
-    working, busy, assistantBusy, locating, routeError, placeError, runtime,
+    working, busy, assistantBusy, locating, routeError, placeError, runtime, mapCommand,
     setOrigin, setDestination, setSelected: selectPlace, setCategory, setScope, setAssistantBusy,
     locate, calculateRoute, startJourney, pauseJourney, resumeJourney, endJourney, recalculateJourney, findPlaces, externalMessage, stopRoute, navigateTo, askParallelAssistant,
   };

@@ -79,6 +79,7 @@ export function startRecognition(callbacks: {
   acceptTranscript?: (text: string, final: boolean) => boolean;
   ignoreTranscript?: (text: string) => boolean;
   retainRejectedTranscript?: (text: string) => boolean;
+  completeOnFinal?: boolean;
 }): () => void {
   const browser = window as VoiceWindow;
   const Constructor = browser.SpeechRecognition || browser.webkitSpeechRecognition;
@@ -161,10 +162,11 @@ export function startRecognition(callbacks: {
     const completed = final ? voiceRequest(transcript) : null;
     callbacks.onTranscript(completed ?? transcript, final);
     if (ended) return;
-    if (completed !== null && callbacks.onComplete) {
+    if ((completed !== null || (final && callbacks.completeOnFinal)) && callbacks.onComplete) {
       if (callbacks.keepAlive) resetDraft(event.results.length);
       else finish();
-      if (completed) callbacks.onComplete(completed);
+      const request = completed ?? sanitizeVoiceRequest(transcript);
+      if (request) callbacks.onComplete(request);
     }
   };
   recognition.onerror = ({ error }) => {

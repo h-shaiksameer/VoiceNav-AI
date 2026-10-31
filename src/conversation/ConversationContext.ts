@@ -1,7 +1,7 @@
 import type { ConversationContext, Message } from "@/types/domain";
 
 export function emptyContext(): ConversationContext {
-  return { language: "en", messages: [], recentPlaces: [], selectedPlaceId: null, lastSearchScope: null, pendingDestination: null, pendingOrigin: null, pendingLocationChoices: [], pendingSourceText: null, pendingRevision: null };
+  return { language: "en", messages: [], recentPlaces: [], selectedPlaceId: null, lastSearchScope: null, pendingDestination: null, pendingOrigin: null, pendingLocationChoices: [], pendingMapAction: null, pendingSourceText: null, pendingRevision: null };
 }
 
 export function clearPendingNavigation(context: ConversationContext): ConversationContext {
@@ -10,6 +10,7 @@ export function clearPendingNavigation(context: ConversationContext): Conversati
     pendingDestination: null,
     pendingOrigin: null,
     pendingLocationChoices: [],
+    pendingMapAction: null,
     pendingSourceText: null,
     pendingRevision: null,
   };

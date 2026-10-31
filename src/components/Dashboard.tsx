@@ -32,7 +32,7 @@ export function Dashboard() {
     <header className="app-header">
       <Link className="brand" href="/" aria-label="VoiceNav AI home"><span className="brand-symbol"><Navigation2 size={25} fill="currentColor" strokeWidth={1.5} /></span><span>VoiceNav<span className="brand-ai">AI</span></span></Link>
       <div className="header-divider" /><span className="header-caption">A clearer way forward.</span>
-      <nav className="header-meta" aria-label="Application status"><span className="demo-badge">DEVELOPMENT MVP</span><span className="privacy-label"><ShieldCheck size={15} /> Destination protected</span><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" title="OpenStreetMap attribution">OpenStreetMap <ArrowUpRight size={13} /></a><button className="header-menu-button" type="button" aria-label="Open map sessions" aria-expanded={sessionsOpen} title="Map sessions" onClick={() => setSessionsOpen((open) => !open)}><Menu size={22} /></button></nav>
+      <nav className="header-meta" aria-label="Application status"><span id="ui-control-slot" /><span className="demo-badge">DEVELOPMENT MVP</span><span className="privacy-label"><ShieldCheck size={15} /> Destination protected</span><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" title="OpenStreetMap attribution">OpenStreetMap <ArrowUpRight size={13} /></a><button className="header-menu-button" type="button" aria-label="Open map sessions" aria-expanded={sessionsOpen} title="Map sessions" onClick={() => setSessionsOpen((open) => !open)}><Menu size={22} /></button></nav>
     </header>
     {!online && <div className="offline-banner" role="alert"><WifiOff size={16} />You are offline. Map tiles, address search, routes, and place searches need an internet connection.</div>}
     <div className="workspace-tabs" role="tablist" aria-label="Map workspaces">
@@ -47,9 +47,9 @@ export function Dashboard() {
         <footer className="sidebar-footer"><Compass size={14} /><span>Explore with intention.</span><span>v0.1</span></footer>
       </aside>
       <section className="map-stage" aria-label="Map and navigation assistant">
-        <MapLoader session={app.session} alternatives={app.alternatives} userLocation={app.userLocation} places={app.search?.places ?? []} selected={app.selected} onSelect={app.setSelected} onLocate={app.locate} />
+        <MapLoader session={app.session} alternatives={app.alternatives} userLocation={app.userLocation} places={app.search?.places ?? []} selected={app.selected} onSelect={app.setSelected} onLocate={app.locate} mapCommand={app.mapCommand} />
         <div className="map-status"><span className={`status-dot ${app.session.route ? "" : "neutral"}`} /><span>{app.session.route ? app.session.status === "active" ? "Journey active" : app.session.status === "paused" ? "Journey paused" : "Route ready" : "No active route"}</span><span className="map-status-divider" /><Radio size={13} /><span>{online ? "OSM map" : "Offline"}</span></div>
-        <VoiceAssistant engine={app.runtime.conversation} blocked={app.busy || app.locating} onBusyChange={app.setAssistantBusy} />
+        <VoiceAssistant engine={app.runtime.conversation} blocked={app.busy || app.locating} onBusyChange={app.setAssistantBusy} active={!activeSessionId} />
         <ParallelAssistantPanel snapshot={app.parallelAssistantSnapshot} blocked={app.working} onAsk={app.askParallelAssistant} onCancel={() => app.parallelAssistant.cancel()} />
       </section>
     </main>

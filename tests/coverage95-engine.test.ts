@@ -73,6 +73,41 @@ test("several distinct alternative routes are described in the plural", async ()
   assert.match(await engine.send("Check other routes."), /2 other driving routes\./);
 });
 
+test("map zoom commands target locations, resolve choices, and reset independently", async () => {
+  const commands: Array<{ action: string; location?: Location }> = [];
+  const hyderabad: Location = { id: "place:hyderabad", name: "Hyderabad", lat: 17.385, lon: 78.4867 };
+  const matches: Location[] = [hyderabad, { id: "place:hyderabad-two", name: "Hyderabad District", lat: 17.4, lon: 78.5 }];
+  const navigation = await activeNavigation();
+  const engine = engineFor(navigation, {
+    searchLocations: async (query) => query === "Missing" ? [] : query === "Single" ? [hyderabad] : matches,
+  }, { onMapCommand: (command) => commands.push(command) });
+
+  assert.match(await engine.executeUiControl("zoom in"), /Map control applied/);
+  assert.match(await engine.executeUiControl("zoom out"), /Map control applied/);
+  assert.match(await engine.executeUiControl("zoom out at Missing"), /could not find Missing/);
+  assert.match(await engine.executeUiControl("zoom in at Single"), /Moved the map to Hyderabad/);
+  assert.match(await engine.executeUiControl("zoom out at Hyderabad"), /nearest Hyderabad/);
+  assert.equal(engine.getSnapshot().pendingMapAction, null);
+  assert.match(await engine.executeUiControl("reset map"), /Map control applied/);
+  assert.deepEqual(commands.map((command) => command.action), ["zoom-in", "zoom-out", "zoom-in", "zoom-out", "reset"]);
+  assert.equal(commands[2].location?.id, "place:hyderabad");
+  assert.equal(commands[3].location?.id, "place:hyderabad");
+  await engine.executeUiControl("move up");
+  await engine.executeUiControl("move down");
+  assert.deepEqual(commands.slice(-2).map((command) => command.action), ["pan-up", "pan-down"]);
+  engine.setLanguage("hi");
+  assert.match(await engine.executeUiControl("zoom in"), /Map control applied/);
+  assert.match(await engine.executeUiControl("zoom out at Hyderabad"), /nearest Hyderabad/);
+  const noMapCallbackEngine = engineFor(await activeNavigation());
+  assert.match(await noMapCallbackEngine.executeUiControl("zoom in"), /Map control applied/);
+  assert.match(await noMapCallbackEngine.executeUiControl("reset map"), /Map control applied/);
+  const referenceOnlyEngine = engineFor(new NavigationController(async () => structuredClone(route)));
+  assert.match(await referenceOnlyEngine.executeUiControl("zoom out at Hyderabad"), /Moved the map to Test destination/);
+  const noCallbackChoices = engineFor(new NavigationController(async () => structuredClone(route)), { searchLocations: async () => matches });
+  assert.match(await noCallbackChoices.executeUiControl("zoom in at Hyderabad"), /nearest Hyderabad/);
+  assert.equal(noCallbackChoices.getSnapshot().pendingMapAction, null);
+});
+
 test("a device-location origin is reported to the caller before destination search", async () => {
   const located: Location[] = [];
   const engine = engineFor(new NavigationController(async () => structuredClone(route)), {}, { onCurrentLocation: (location) => located.push(location) });

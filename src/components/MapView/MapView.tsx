@@ -4,15 +4,16 @@ import { useEffect, useRef, useState } from "react";
 import { CircleMarker, MapContainer, Polyline, Popup, TileLayer, Tooltip, useMap } from "react-leaflet";
 import { latLngBounds } from "leaflet";
 import { AlertTriangle, Layers, LocateFixed, MapPin, Minus, Plus } from "lucide-react";
-import type { Location, NavigationSession, PlaceResult, RouteResult } from "@/types/domain";
+import type { Location, MapCommand, NavigationSession, PlaceResult, RouteResult } from "@/types/domain";
 import { formatDistance, formatDuration } from "@/utils/geo";
 
-type Props = { session: NavigationSession; alternatives: RouteResult[]; userLocation: Location | null; places: PlaceResult[]; selected: PlaceResult | null; onSelect: (place: PlaceResult) => void; onLocate: () => void };
+type Props = { session: NavigationSession; alternatives: RouteResult[]; userLocation: Location | null; places: PlaceResult[]; selected: PlaceResult | null; onSelect: (place: PlaceResult) => void; onLocate: () => void; mapCommand?: MapCommand | null };
 
-function MapBehavior({ session, alternatives, userLocation, places, selected, onLocate }: Props) {
+function MapBehavior({ session, alternatives, userLocation, places, selected, onLocate, mapCommand }: Props) {
   const map = useMap();
   const lastRevision = useRef(-1);
   const lastPlaceIds = useRef("");
+  const lastMapCommand = useRef(0);
 
   useEffect(() => {
     const observer = new ResizeObserver(() => map.invalidateSize());
@@ -47,6 +48,21 @@ function MapBehavior({ session, alternatives, userLocation, places, selected, on
   useEffect(() => {
     if (selected) map.setView([selected.lat, selected.lon], Math.max(map.getZoom(), 15));
   }, [map, selected]);
+
+  useEffect(() => {
+    if (!mapCommand || mapCommand.id === lastMapCommand.current) return;
+    lastMapCommand.current = mapCommand.id;
+    if (mapCommand.action === "reset") { map.setView([20, 0], 3, { animate: false }); return; }
+    if (mapCommand.location) map.setView([mapCommand.location.lat, mapCommand.location.lon], map.getZoom(), { animate: false });
+    if (mapCommand.action === "center") return;
+    const amount = mapCommand.amount ?? 1;
+    if (mapCommand.action === "zoom-in") map.zoomIn(amount);
+    else if (mapCommand.action === "zoom-out") map.zoomOut(amount);
+    else if (mapCommand.action === "pan-left") map.panBy([-160 * amount, 0]);
+    else if (mapCommand.action === "pan-right") map.panBy([160 * amount, 0]);
+    else if (mapCommand.action === "pan-up") map.panBy([0, -160 * amount]);
+    else if (mapCommand.action === "pan-down") map.panBy([0, 160 * amount]);
+  }, [map, mapCommand]);
 
   return <div className="map-controls">
     <button className="map-button" title="Zoom in" aria-label="Zoom in" onClick={() => map.zoomIn()}><Plus size={19} /></button>

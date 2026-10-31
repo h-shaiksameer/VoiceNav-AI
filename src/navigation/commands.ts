@@ -139,3 +139,4 @@ export function distanceBetweenInstruction(text: string): { originQuery: string;
   const query = match[2].trim();
   return originQuery && query ? { originQuery, query } : null;
 }
+
