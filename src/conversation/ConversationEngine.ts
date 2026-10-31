@@ -62,6 +62,7 @@ export class ConversationEngine {
   private say(english: string, hindi: string): string { return this.context.language === "hi" ? hindi : english; }
   private duration(seconds: number): string { return this.context.language === "hi" ? formatDuration(seconds).replace(/hr/g, "घंटे").replace(/min/g, "मिनट") : formatDuration(seconds); }
   private distance(meters: number): string { return this.context.language === "hi" ? formatDistance(meters).replace(/km/g, "किलोमीटर").replace(/m/g, "मीटर") : formatDistance(meters); }
+  private shortLocationName(location: Location): string { return location.name.trim().split(/\s+/u).slice(0, 3).join(" "); }
   private clearPending() { this.update(clearPendingNavigation(this.context)); }
 
   resetNavigationContext(): void {
@@ -150,12 +151,15 @@ export class ConversationEngine {
     return this.say(`I found ${choices.length} destination matches, ${order}. ${names.map((name, index) => `Option ${index + 1}: ${name}`).join(". ")}. Say the option number followed by ${VOICE_SEND_PHRASE}. I have not changed your route.`, `${choices.length} जगहें मिली हैं, ${hindiOrder} है। ${names.map((name, index) => `विकल्प ${index + 1}: ${name}`).join("। ")}। विकल्प के नंबर के बाद ${HINDI_VOICE_SEND_PHRASE} बोलिए। अभी रास्ता नहीं बदला है।`);
   }
 
-  private resolveDestinations(locations: Location[], sourceText: string, revision: number, origin: Location | null): string {
+  private async resolveDestinations(locations: Location[], sourceText: string, revision: number, origin: Location | null): Promise<string> {
     if (this.navigation.getSnapshot().revision !== revision) throw new Error("Your journey changed during address search. Please ask again.");
     const reference = origin ?? this.navigation.getSnapshot().origin ?? this.callbacks.getReferenceLocation();
     const matches = locations.filter((location) => !reference?.countryCode || location.countryCode === reference.countryCode);
     if (!matches.length) throw new Error("No matching destination was found in the starting location's country. Give a more specific name or address. Your route is unchanged.");
-    if (matches.length === 1) return this.propose(matches[0], sourceText, revision, origin);
+    if (matches.length === 1) {
+      const proposal = this.propose(matches[0], sourceText, revision, origin);
+      return origin ? this.commitPending() : proposal;
+    }
     const choices = [...matches].sort((first, second) => reference ? distanceBetween(reference, first) - distanceBetween(reference, second) : 0).slice(0, 5);
     this.update({ ...this.context, pendingDestination: null, pendingOrigin: origin, pendingLocationChoices: choices, pendingSourceText: sourceText, pendingRevision: revision });
     return this.locationChoicesText(choices);
@@ -278,7 +282,7 @@ export class ConversationEngine {
           if (!session.origin && intent.query && intent.reference === undefined && !intent.category) {
             const startingLocation = this.callbacks.getReferenceLocation();
             response = startingLocation
-              ? this.resolveDestinations(await this.services.searchLocations(intent.query, startingLocation), clean, session.revision, startingLocation)
+              ? await this.resolveDestinations(await this.services.searchLocations(intent.query, startingLocation), clean, session.revision, startingLocation)
               : await this.planRoute("current location", intent.query, clean, session.revision);
             break;
           }
@@ -302,7 +306,7 @@ export class ConversationEngine {
             else if (matches.length > 1) { response = "Several results have that name. Specify the result number."; break; }
             else {
               const locations = await this.services.searchLocations(query, session.origin);
-              response = this.resolveDestinations(locations, clean, session.revision, null);
+              response = await this.resolveDestinations(locations, clean, session.revision, null);
               break;
             }
           }
@@ -336,6 +340,8 @@ export class ConversationEngine {
     const destination = destinations[0];
     const route = await this.services.requestRoute([origin, destination]);
     if (this.navigation.getSnapshot().revision !== revision) throw new Error("Your journey changed while checking that distance. Please ask again.");
-    return this.say(`The driving distance between ${origin.name} and ${destination.name} is ${formatDistance(route.distanceMeters)}, with an estimated driving time of ${formatDuration(route.durationSeconds)}. Your current route and destination are unchanged.`, `${origin.name} और ${destination.name} के बीच ड्राइविंग दूरी ${this.distance(route.distanceMeters)} है और अनुमानित समय ${this.duration(route.durationSeconds)} है। आपका मौजूदा रास्ता और मंज़िल वही हैं।`);
+    const originName = this.shortLocationName(origin);
+    const destinationName = this.shortLocationName(destination);
+    return this.say(`The driving distance between ${originName} and ${destinationName} is ${formatDistance(route.distanceMeters)}.`, `${originName} और ${destinationName} के बीच ड्राइविंग दूरी ${this.distance(route.distanceMeters)} है।`);
   }
 }

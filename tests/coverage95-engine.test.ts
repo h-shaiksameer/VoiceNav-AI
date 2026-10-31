@@ -195,7 +195,7 @@ test("distance between two named places is distinct from current route distance"
   });
   const intent = await new LocalIntentProvider().process({ text: "Check distance between Charminar and Farrukh Nagar", context: emptyContext(), session: emptySession() });
   assert.deepEqual(intent, { type: "GET_DISTANCE_BETWEEN", originQuery: "Charminar", query: "Farrukh Nagar" });
-  assert.match(await engine.send("Check distance between Charminar and Farrukh Nagar"), /7.8 km/);
+  assert.equal(await engine.send("Check distance between Charminar and Farrukh Nagar"), "The driving distance between Charminar and Farrukh Nagar is 7.8 km.");
   assert.deepEqual(searched, ["Charminar", "Farrukh Nagar"]);
   assert.deepEqual(references, [origin, { id: "test:Charminar", name: "Charminar", lat: 17.36, lon: 78.47 }]);
   assert.equal(navigation.getSnapshot().route, null);

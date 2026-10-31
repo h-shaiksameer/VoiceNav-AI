@@ -293,7 +293,7 @@ test("short Target labels still reject empty values, questions, negation and alt
   }
 });
 
-test("a standalone target location requests the current origin and waits for spoken confirmation", async (context) => {
+test("a standalone target location requests the current origin and starts the route directly", async (context) => {
   mockServices(context, undefined, [destination]);
   const navigation = new NavigationController(async () => structuredClone(fixtureRoute));
   let locationRequests = 0;
@@ -303,11 +303,9 @@ test("a standalone target location requests the current origin and waits for spo
   });
   const reply = await engine.send("Target location Charminar.");
   assert.equal(locationRequests, 1);
-  assert.equal(engine.getSnapshot().pendingOrigin?.id, origin.id);
-  assert.equal(engine.getSnapshot().pendingDestination?.id, destination.id);
-  assert.equal(navigation.getSnapshot().route, null);
-  assert.match(reply, /say confirm route/i);
-  await engine.send("Confirm route.");
+  assert.equal(engine.getSnapshot().pendingOrigin, null);
+  assert.equal(engine.getSnapshot().pendingDestination, null);
+  assert.match(reply, /Route ready/);
   assert.equal(navigation.getSnapshot().destination?.id, destination.id);
 });
 
@@ -409,11 +407,9 @@ test("conversation service adapters are substitutable without changing confirmat
   const navigation = new NavigationController(async () => { commits += 1; return fixtureRoute; });
   const engine = new ConversationEngine(navigation, { onPlaces: () => {}, onSelectPlace: () => {}, onDetours: () => {}, getReferenceLocation: () => null }, services);
   await engine.send("Plan a route from current location to Oxford");
-  assert.equal(commits, 0);
-  assert.equal(navigation.getSnapshot().route, null);
-  assert.deepEqual(calls.slice(0, 2), [{ method: "gps", args: [] }, { method: "locations", args: ["Oxford", gps] }]);
-  await engine.confirm();
   assert.equal(commits, 1);
+  assert.ok(navigation.getSnapshot().route);
+  assert.deepEqual(calls.slice(0, 2), [{ method: "gps", args: [] }, { method: "locations", args: ["Oxford", gps] }]);
   const session = navigation.getSnapshot();
   await engine.find("restaurant", "route");
   await engine.compare();
@@ -426,7 +422,8 @@ test("conversation service adapters are substitutable without changing confirmat
   await engine.send("Plan a route from Starttown to Oxford");
   assert.deepEqual(calls.at(-2), { method: "locations", args: ["Starttown", undefined] });
   assert.deepEqual(calls.at(-1), { method: "locations", args: ["Oxford", origin] });
-  assert.strictEqual(navigation.getSnapshot(), session);
+  assert.notStrictEqual(navigation.getSnapshot(), session);
+  assert.equal(commits, 2);
 });
 
 function mockResponses(context: TestContext, handler: (path: string, body: Record<string, unknown>) => unknown | Promise<unknown>) {
@@ -463,8 +460,7 @@ for (const origins of [[], [origin, destination], [origin]]) {
     const engine = engineFixture(navigation);
     const reply = await engine.send("Plan a route from London to Oxford");
     if (origins.length === 1) {
-      assert.match(reply, /Plan a driving route from Test origin/);
-      await engine.send("confirm route");
+      assert.match(reply, /Route ready/);
       assert.equal(navigation.getSnapshot().origin?.id, origin.id);
       assert.equal(navigation.getSnapshot().destination?.id, destination.id);
     } else {
@@ -478,11 +474,11 @@ test("a first destination can use the available reference location without reque
   mockServices(context, undefined, [destination]);
   const navigation = new NavigationController(async () => fixtureRoute);
   const engine = engineFixture(navigation);
-  await engine.send("Navigate to Oxford");
-  assert.equal(engine.getSnapshot().pendingOrigin?.id, origin.id);
-  await engine.send("हाँ");
+  const reply = await engine.send("Navigate to Oxford");
+  assert.match(reply, /Route ready/);
+  assert.equal(engine.getSnapshot().pendingOrigin, null);
   assert.equal(navigation.getSnapshot().destination?.id, destination.id);
-  assert.match(engine.getSnapshot().messages.at(-1)?.text ?? "", /मिनट/);
+  assert.match(engine.getSnapshot().messages.at(-1)?.text ?? "", /Estimated driving time/);
 });
 
 test("affirmative answers clarify multiple address choices and cancellation leaves the journey unchanged", async (context) => {
@@ -1546,7 +1542,7 @@ test("the exact spoken starting-location sentence produces a complete structured
   assert.equal(intent.query, "Charminar");
 });
 
-test("a current-location route can be planned and confirmed entirely through conversation", async (context) => {
+test("a current-location route can be planned directly through conversation", async (context) => {
   const routeOrigin = { ...origin, name: "Main origin entrance near Central Square, London Greater London England United Kingdom" };
   const routeDestination = { ...destination, name: "Charminar Monument Near Laad Bazaar, Hyderabad Telangana India" };
   mockServices(context, undefined, [routeDestination]);
@@ -1558,18 +1554,10 @@ test("a current-location route can be planned and confirmed entirely through con
   });
   const reply = await engine.send("Select Starting location, location as current location and Target location as Charminar.");
   assert.equal(locationRequests, 1);
-  assert.equal(engine.getSnapshot().pendingOrigin?.id, origin.id);
-  assert.equal(engine.getSnapshot().pendingDestination?.id, destination.id);
-  assert.equal(navigation.getSnapshot().route, null);
-  assert.match(reply, /say confirm route/i);
-  const proposal = engine.getSnapshot().messages.at(-1);
-  assert.ok(proposal?.role === "assistant");
-  for (const location of [routeOrigin, routeDestination]) {
-    assert.ok(proposal.text.includes(location.name));
-    assert.ok(proposal.spokenText?.includes(location.name.split(/\s+/u).slice(0, 5).join(" ")));
-    assert.ok(!proposal.spokenText?.includes(location.name));
-  }
-  await engine.send("Confirm route.");
+  assert.equal(engine.getSnapshot().pendingOrigin, null);
+  assert.equal(engine.getSnapshot().pendingDestination, null);
+  assert.ok(navigation.getSnapshot().route);
+  assert.match(reply, /Route ready/i);
   assert.equal(navigation.getSnapshot().origin?.id, origin.id);
   assert.equal(navigation.getSnapshot().destination?.id, destination.id);
   assert.equal(navigation.getSnapshot().route?.distanceMeters, fixtureRoute.distanceMeters);
@@ -1781,8 +1769,9 @@ for (const source of ["active origin", "new current location", "selected startin
     });
     await engine.send("Plan a route from current location to HITECH City");
     assert.deepEqual(requests, [{ query: "HITECH City", reference: { lat: current.lat, lon: current.lon } }]);
-    assert.equal(engine.getSnapshot().pendingDestination?.countryCode, "gb");
-    assert.equal(navigation.getSnapshot().route, null);
+    assert.equal(engine.getSnapshot().pendingDestination, null);
+    assert.equal(navigation.getSnapshot().destination?.countryCode, "gb");
+    assert.ok(navigation.getSnapshot().route);
   });
 
   for (const countryCode of ["in", undefined]) {
