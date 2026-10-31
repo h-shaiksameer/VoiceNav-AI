@@ -3,11 +3,23 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { AudioLines, Check, ChevronDown, ChevronUp, LoaderCircle, Mic, MicOff, Send, Square, Volume2, X } from "lucide-react";
 import type { ConversationEngine } from "@/conversation/ConversationEngine";
+import { lastOptionIndex } from "@/navigation/commands";
 import { HINDI_VOICE_SEND_PHRASE, prepareSpokenText, recognitionMessages, recognitionSupported, speakResponse, startMicrophoneInterruption, startRecognition, VOICE_SEND_PHRASE } from "@/services/voice/browserVoice";
 
 type VoiceState = "idle" | "listening" | "processing" | "responding" | "error";
 const subscribeCapabilities = () => () => {};
 const serverRecognition = () => false;
+let microphoneOwner: symbol | null = null;
+
+function claimMicrophone(owner: symbol): boolean {
+  if (microphoneOwner && microphoneOwner !== owner) return false;
+  microphoneOwner = owner;
+  return true;
+}
+
+function releaseMicrophone(owner: symbol): void {
+  if (microphoneOwner === owner) microphoneOwner = null;
+}
 
 export function VoiceAssistant({ engine, blocked, onBusyChange }: { engine: ConversationEngine; blocked: boolean; onBusyChange: (busy: boolean) => void }) {
   const context = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
@@ -16,6 +28,7 @@ export function VoiceAssistant({ engine, blocked, onBusyChange }: { engine: Conv
   const [input, setInput] = useState("");
   const [error, setError] = useState("");
   const [spoken, setSpoken] = useState(true);
+  const [microphoneIdentity] = useState(() => Symbol("voice-workspace"));
   const [allowInterruptions, setAllowInterruptions] = useState(false);
   const [interruptionReady, setInterruptionReady] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -35,6 +48,8 @@ export function VoiceAssistant({ engine, blocked, onBusyChange }: { engine: Conv
   const speechEnabled = useRef(true);
   const beforeListening = useRef("");
   const requestActive = useRef(false);
+  const optionAutoSubmit = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const invalidOptionAttempts = useRef(0);
   const voiceConversation = useRef(false);
   const resumeListening = useRef<(followup?: boolean) => void>(() => {});
   const resumeSubmission = useRef<(text: string) => void>(() => {});
@@ -58,8 +73,10 @@ export function VoiceAssistant({ engine, blocked, onBusyChange }: { engine: Conv
       stopInterruption.current?.(); stopInterruption.current = null;
       abortListening.current?.(); abortListening.current = null;
       stopSpeaking.current?.(); stopSpeaking.current = null;
+      if (optionAutoSubmit.current) clearTimeout(optionAutoSubmit.current);
+      releaseMicrophone(microphoneIdentity);
     };
-  }, []);
+  }, [microphoneIdentity]);
   useEffect(() => { if (messages.current) messages.current.scrollTop = messages.current.scrollHeight; }, [context.messages, collapsed]);
   useEffect(() => {
     function stopHiddenRecording() {
@@ -67,6 +84,7 @@ export function VoiceAssistant({ engine, blocked, onBusyChange }: { engine: Conv
       interruptionEnabled.current = false;
       microphoneReady.current = false;
       queuedVoiceRequests.current = [];
+      releaseMicrophone(microphoneIdentity);
       setAllowInterruptions(false);
       const active = replyActive.current || Boolean(abortListening.current) || Boolean(stopSpeaking.current);
       voiceConversation.current = false;
@@ -83,7 +101,7 @@ export function VoiceAssistant({ engine, blocked, onBusyChange }: { engine: Conv
     }
     document.addEventListener("visibilitychange", stopHiddenRecording);
     return () => document.removeEventListener("visibilitychange", stopHiddenRecording);
-  }, [onBusyChange]);
+  }, [microphoneIdentity, onBusyChange]);
 
   function stopVoice() {
     microphoneReady.current = false;
@@ -97,6 +115,7 @@ export function VoiceAssistant({ engine, blocked, onBusyChange }: { engine: Conv
     stopSpeaking.current?.(); stopSpeaking.current = null;
     setState("idle");
     onBusyChange(false);
+    releaseMicrophone(microphoneIdentity);
     if (interruptionEnabled.current && panelOpen.current && !document.hidden) armInterruption();
   }
 
@@ -115,12 +134,21 @@ export function VoiceAssistant({ engine, blocked, onBusyChange }: { engine: Conv
     stopInterruption.current?.(); stopInterruption.current = null;
     setState("idle"); onBusyChange(false);
     const pending = engine.getSnapshot();
+    if (!pending.pendingLocationChoices.length) invalidOptionAttempts.current = 0;
     if (voiceConversation.current && !document.hidden && (pending.pendingDestination || pending.pendingLocationChoices.length)) resumeListening.current();
     else voiceConversation.current = false;
   }
 
   function armInterruption() {
     if (!interruptionEnabled.current || !voiceSupported || !panelOpen.current || document.hidden) { pendingPlayback.current?.(); return; }
+    if (!claimMicrophone(microphoneIdentity)) {
+      interruptionEnabled.current = false;
+      setAllowInterruptions(false);
+      setInterruptionReady(false);
+      setError("Another workspace is using the microphone. Stop it there before enabling voice here.");
+      pendingPlayback.current?.();
+      return;
+    }
     if (stopInterruption.current) {
       if (microphoneReady.current) pendingPlayback.current?.();
       return;
@@ -157,6 +185,7 @@ export function VoiceAssistant({ engine, blocked, onBusyChange }: { engine: Conv
       onComplete: (text) => { liveDraft.current = ""; setInput(""); resumeSubmission.current(text); },
       onDiscard: () => { liveDraft.current = ""; beforeListening.current = ""; setInput(""); },
       onEnd: () => {
+        releaseMicrophone(microphoneIdentity);
         microphoneReady.current = false;
         stopInterruption.current = null;
         interruptionEnabled.current = false;
@@ -165,6 +194,7 @@ export function VoiceAssistant({ engine, blocked, onBusyChange }: { engine: Conv
         if (!replyActive.current && !requestActive.current) { setState("idle"); onBusyChange(false); }
       },
       onError: (message) => {
+        releaseMicrophone(microphoneIdentity);
         stopInterruption.current = null;
         abortListening.current = null;
         interruptionEnabled.current = false;
@@ -244,11 +274,32 @@ export function VoiceAssistant({ engine, blocked, onBusyChange }: { engine: Conv
 
   async function submit(text: string, fromVoice = false) {
     if (!text.trim()) return;
+    if (microphoneOwner && microphoneOwner !== microphoneIdentity) {
+      setError("Another workspace is using the microphone. Stop it there before speaking to Nova here.");
+      return;
+    }
     if (requestActive.current || blocked) {
       if (fromVoice && interruptionEnabled.current) { queuedVoiceRequests.current.push(text); setInput(""); }
       return;
     }
     if (processing && !fromVoice) return;
+    const choices = engine.getSnapshot().pendingLocationChoices;
+    if (fromVoice && choices.length) {
+      const selectedOption = lastOptionIndex(text);
+      const validOption = selectedOption !== undefined && selectedOption >= 0 && selectedOption < choices.length;
+      if (!validOption) {
+        invalidOptionAttempts.current += 1;
+        if (invalidOptionAttempts.current >= 3) {
+          const response = engine.cancel(
+            "I could not match your option twice, so I ignored this route. The microphone is closed. Restart the microphone to start a route.",
+            "विकल्प दो बार नहीं मिला, इसलिए यह रास्ता छोड़ दिया है। माइक्रोफोन बंद है। रास्ता शुरू करने के लिए माइक्रोफोन फिर शुरू करें।",
+          );
+          invalidOptionAttempts.current = 0;
+          await run(() => Promise.resolve(response));
+          return;
+        }
+      } else invalidOptionAttempts.current = 0;
+    }
     if (!fromVoice && interruptionEnabled.current) {
       stopInterruption.current?.(); stopInterruption.current = null;
       microphoneReady.current = false;
@@ -262,6 +313,11 @@ export function VoiceAssistant({ engine, blocked, onBusyChange }: { engine: Conv
   function listen(followup = false) {
     if (!followup && state === "listening") { stopVoice(); return; }
     if ((blocked && !followup) || (state === "processing" && !followup) || !panelOpen.current || document.hidden) return;
+    if (!claimMicrophone(microphoneIdentity)) {
+      setError("Another workspace is using the microphone. Stop it there before starting voice here.");
+      setState("error");
+      return;
+    }
     if (interruptionEnabled.current) { interruptReply(); armInterruption(); return; }
     if (replyActive.current) playbackStoppedAt.current = Date.now();
     voiceConversation.current = true;
@@ -277,28 +333,58 @@ export function VoiceAssistant({ engine, blocked, onBusyChange }: { engine: Conv
       language: engine.getSnapshot().language === "hi" ? "hi-IN" : "en-IN",
       startDelayMs: Date.now() - playbackStoppedAt.current < 400 ? 400 : 0,
       initialTranscript: beforeListening.current,
-      onTranscript: (text) => {
+      onTranscript: (text, final) => {
         liveDraft.current = text;
         setInput(text.slice(0, 500));
+        if (engine.getSnapshot().pendingLocationChoices.length && final) {
+          if (optionAutoSubmit.current) clearTimeout(optionAutoSubmit.current);
+          optionAutoSubmit.current = setTimeout(() => {
+            optionAutoSubmit.current = null;
+            abortListening.current?.();
+            abortListening.current = null;
+            void submit(text, true);
+          }, 3000);
+        }
       },
       onComplete: (text) => { void submit(text, true); },
       onDiscard: () => { liveDraft.current = ""; beforeListening.current = ""; setInput(""); },
       maxDurationMs: followup ? 15000 : 90000,
-      onError: (reason) => { voiceConversation.current = false; setError(recognitionMessages[reason]); setState("error"); onBusyChange(false); },
-      onEnd: () => { voiceConversation.current = false; abortListening.current = null; setState((current) => current === "listening" ? "idle" : current); onBusyChange(false); },
+      onError: (reason) => { releaseMicrophone(microphoneIdentity); voiceConversation.current = false; setError(recognitionMessages[reason]); setState("error"); onBusyChange(false); },
+      onEnd: () => { releaseMicrophone(microphoneIdentity); voiceConversation.current = false; abortListening.current = null; setState((current) => current === "listening" ? "idle" : current); onBusyChange(false); },
     });
   }
 
   function setContinuousListening(enabled: boolean) {
+    if (enabled && !claimMicrophone(microphoneIdentity)) {
+      setError("Another workspace is using the microphone. Stop it there before enabling voice here.");
+      return;
+    }
     setAllowInterruptions(enabled);
     interruptionEnabled.current = enabled;
     if (enabled) { setError(""); armInterruption(); return; }
     stopInterruption.current?.(); stopInterruption.current = null;
+    releaseMicrophone(microphoneIdentity);
     microphoneReady.current = false;
     queuedVoiceRequests.current = [];
     setInterruptionReady(false);
     if (!replyActive.current && !requestActive.current) { setState(abortListening.current ? "listening" : "idle"); onBusyChange(Boolean(abortListening.current)); }
     pendingPlayback.current?.();
+  }
+
+  function scheduleTypedOption(text: string) {
+    const choices = engine.getSnapshot().pendingLocationChoices;
+    const selectedOption = lastOptionIndex(text);
+    const validOption = selectedOption !== undefined && selectedOption >= 0 && selectedOption < choices.length;
+    if (!choices.length || !validOption) {
+      if (optionAutoSubmit.current) clearTimeout(optionAutoSubmit.current);
+      optionAutoSubmit.current = null;
+      return;
+    }
+    if (optionAutoSubmit.current) clearTimeout(optionAutoSubmit.current);
+    optionAutoSubmit.current = setTimeout(() => {
+      optionAutoSubmit.current = null;
+      void submit(text, true);
+    }, 3000);
   }
 
   useEffect(() => {
@@ -323,7 +409,7 @@ export function VoiceAssistant({ engine, blocked, onBusyChange }: { engine: Conv
       {!voiceSupported && <p className="voice-unavailable"><MicOff size={12} />Voice input unavailable. Text input is ready.</p>}
       <form className="assistant-form" onSubmit={(event) => { event.preventDefault(); void submit(input); }}>
         <label className="sr-only" htmlFor="assistant-message">Message the navigation assistant</label>
-        <textarea id="assistant-message" lang={context.language === "hi" ? "hi" : "en"} placeholder={context.language === "hi" ? "अपनी मंज़िल या रास्ते के बारे में पूछिए…" : "Ask about your journey…"} rows={2} maxLength={500} value={input} onChange={(event) => { liveDraft.current = event.target.value; if (state === "listening") stopVoice(); setInput(event.target.value); }} disabled={processing || blocked} autoComplete="off" onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(input); } }} />
+        <textarea id="assistant-message" lang={context.language === "hi" ? "hi" : "en"} placeholder={context.language === "hi" ? "अपनी मंज़िल या रास्ते के बारे में पूछिए…" : "Ask about your journey…"} rows={2} maxLength={500} value={input} onChange={(event) => { liveDraft.current = event.target.value; if (state === "listening") stopVoice(); setInput(event.target.value); scheduleTypedOption(event.target.value); }} disabled={processing || blocked} autoComplete="off" onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(input); } }} />
         <button type="button" className={`mic-button ${state === "listening" ? "active" : ""}`} title={state === "listening" ? "Stop recording and keep draft" : state === "responding" ? "Interrupt reply and listen" : "Start voice input"} aria-label={state === "listening" ? "Stop recording and keep draft" : state === "responding" ? "Interrupt reply and listen" : "Start voice input"} aria-pressed={state === "listening"} onClick={() => listen()} disabled={!voiceSupported || state === "processing" || blocked}>{state === "listening" ? <Square size={16} /> : <Mic size={18} />}</button>
         {state === "listening" && <button className="icon-button" type="button" title="Cancel voice draft" aria-label="Cancel voice draft" onClick={() => { if (interruptionEnabled.current) { stopInterruption.current?.(); stopInterruption.current = null; microphoneReady.current = false; liveDraft.current = ""; beforeListening.current = ""; setInput(""); armInterruption(); } else { stopVoice(); liveDraft.current = beforeListening.current; setInput(beforeListening.current); } }}><X size={15} /></button>}
         {state === "responding" ? <button className="icon-button" type="button" title="Stop speaking" aria-label="Stop speaking" onClick={stopVoice}><Square size={16} /></button> : <button className="send-button" type="submit" title={state === "listening" ? "Finish recording and send" : "Send message"} aria-label={state === "listening" ? "Finish recording and send" : "Send message"} disabled={!input.trim() || processing || blocked}>{state === "processing" ? <LoaderCircle size={17} className="spin" /> : <Send size={17} />}</button>}

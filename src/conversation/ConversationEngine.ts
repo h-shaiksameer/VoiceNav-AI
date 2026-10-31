@@ -148,7 +148,7 @@ export class ConversationEngine {
     const names = choices.map((location) => location.name);
     const order = "nearest first by straight-line distance from your starting location";
     const hindiOrder = "शुरुआती जगह से सीधी दूरी के हिसाब से पास वाली पहले";
-    return this.say(`I found ${choices.length} destination matches, ${order}. ${names.map((name, index) => `Option ${index + 1}: ${name}`).join(". ")}. Say the option number followed by ${VOICE_SEND_PHRASE}. I have not changed your route.`, `${choices.length} जगहें मिली हैं, ${hindiOrder} है। ${names.map((name, index) => `विकल्प ${index + 1}: ${name}`).join("। ")}। विकल्प के नंबर के बाद ${HINDI_VOICE_SEND_PHRASE} बोलिए। अभी रास्ता नहीं बदला है।`);
+    return this.say(`I found ${choices.length} destination matches, ${order}. ${names.map((name, index) => `Option ${index + 1}: ${name}`).join(". ")}. Say the option number. I will process it after three seconds. I have not changed your route.`, `${choices.length} जगहें मिली हैं, ${hindiOrder} है। ${names.map((name, index) => `विकल्प ${index + 1}: ${name}`).join("। ")}। विकल्प का नंबर बोलिए। तीन सेकंड बाद इसे प्रोसेस करूँगा। अभी रास्ता नहीं बदला है।`);
   }
 
   private async resolveDestinations(locations: Location[], sourceText: string, revision: number, origin: Location | null): Promise<string> {
@@ -213,7 +213,7 @@ export class ConversationEngine {
     } finally { this.busy = false; }
   }
 
-  cancel(): string { this.clearPending(); return this.reply(this.say("Destination change cancelled. Your current route is unchanged.", "ठीक है, बदलाव रद्द कर दिया। आपका पुराना रास्ता वही है।")); }
+  cancel(message = "Destination change cancelled. Your current route is unchanged.", spokenMessage = "ठीक है, बदलाव रद्द कर दिया। आपका पुराना रास्ता वही है।"): string { this.clearPending(); return this.reply(this.say(message, spokenMessage)); }
 
   async send(text: string): Promise<string> {
     if (this.busy) throw new Error("Please wait for the current request to finish.");
@@ -238,6 +238,7 @@ export class ConversationEngine {
         this.selectLocation(selectedOption);
         return await this.commitPending();
       }
+      if (this.context.pendingLocationChoices.length) return this.reply(this.say("That was not one of the listed options. Say option one, option two, or another listed option number.", "यह सूची में दिया गया विकल्प नहीं है। विकल्प एक, विकल्प दो, या सूची का कोई दूसरा नंबर बोलिए।"));
       const session = this.navigation.getSnapshot();
       const intent = await this.processor.process({ text: clean, context: this.context, session });
       if (["PLAN_ROUTE", "CHANGE_DESTINATION", "STOP_NAVIGATION", "SEARCH_NEARBY", "SEARCH_ALONG_ROUTE"].includes(intent.type)) this.clearPending();

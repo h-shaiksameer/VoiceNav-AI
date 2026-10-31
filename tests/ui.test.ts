@@ -4,6 +4,7 @@ import { createElement } from "react";
 import { act, cleanup, fireEvent, render, renderHook } from "@testing-library/react";
 import { JSDOM } from "jsdom";
 import { PlaceResults } from "@/components/PlaceResults/PlaceResults";
+import { Dashboard } from "@/components/Dashboard";
 import { VoiceAssistant } from "@/components/VoiceAssistant/VoiceAssistant";
 import { ServiceStatus } from "@/components/ServiceStatus";
 import { useNavigationApp } from "@/components/useNavigationApp";
@@ -15,7 +16,7 @@ import type { Location, PlaceResult, RouteResult } from "@/types/domain";
 
 function browser(context: TestContext) {
   const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "http://localhost:3000", pretendToBeVisual: true });
-  const globals = { window: dom.window, document: dom.window.document, navigator: dom.window.navigator, HTMLElement: dom.window.HTMLElement, Node: dom.window.Node };
+  const globals = { window: dom.window, self: dom.window, document: dom.window.document, navigator: dom.window.navigator, HTMLElement: dom.window.HTMLElement, Node: dom.window.Node };
   const saved = new Map(Object.keys(globals).map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { configurable: true, value });
   context.after(() => {
@@ -188,4 +189,21 @@ test("normal voice mode reopens the microphone after Nova asks for a destination
   assert.equal(engine.getSnapshot().pendingLocationChoices.length, 2);
   assert.notStrictEqual(Recognition.latest, firstRecognition);
   assert.equal(view.getByRole("button", { name: "Stop recording and keep draft" }) !== null, true);
+});
+
+test("map sessions open from the hamburger and support create, switch and delete", (context) => {
+  browser(context);
+  const view = render(createElement(Dashboard));
+  fireEvent.click(view.getByRole("button", { name: "Open map sessions" }));
+  assert.ok(view.getByRole("complementary", { name: "Map sessions" }));
+  fireEvent.click(view.getByRole("button", { name: "+ New session" }));
+  fireEvent.click(view.getByRole("button", { name: "+ New session" }));
+  const sessionList = view.getByRole("complementary", { name: "Map sessions" }).querySelector(".session-list")!;
+  assert.equal(sessionList.querySelectorAll("li").length, 2);
+  fireEvent.click(sessionList.querySelector("li button")!);
+  assert.equal(sessionList.querySelector("[aria-label='Delete Session 1']")?.getAttribute("aria-label"), "Delete Session 1");
+  fireEvent.click(view.getByRole("button", { name: "Delete Session 1" }));
+  assert.equal(view.queryByRole("button", { name: /Delete Session 1/ }), null);
+  assert.equal(sessionList.querySelectorAll("li").length, 1);
+  assert.ok(sessionList.textContent?.includes("Session 2"));
 });
