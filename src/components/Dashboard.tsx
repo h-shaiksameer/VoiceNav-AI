@@ -2,7 +2,7 @@
 
 import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { ArrowUpRight, Compass, Menu, Navigation2, Radio, ShieldCheck, WifiOff, X } from "lucide-react";
+import { ArrowUpRight, Compass, Menu, Radio, ShieldCheck, WifiOff, X } from "lucide-react";
 import { RoutePanel } from "@/components/RoutePanel/RoutePanel";
 import { PlaceResults } from "@/components/PlaceResults/PlaceResults";
 import { VoiceAssistant } from "@/components/VoiceAssistant/VoiceAssistant";
@@ -30,7 +30,7 @@ export function Dashboard() {
   return <div className="app-shell">
     <a className="skip-link" href="#journey">Skip to route planner</a>
     <header className="app-header">
-      <Link className="brand" href="/" aria-label="VoiceNav AI home"><span className="brand-symbol"><Navigation2 size={25} fill="currentColor" strokeWidth={1.5} /></span><span>VoiceNav<span className="brand-ai">AI</span></span></Link>
+      <Link className="brand" href="/" aria-label="VoiceNav AI home"><span className="brand-symbol"><img src="/voicenav-badge.png" alt="" /></span><span>VoiceNav<span className="brand-ai">AI</span></span></Link>
       <div className="header-divider" /><span className="header-caption">A clearer way forward.</span>
       <nav className="header-meta" aria-label="Application status"><span id="ui-control-slot" /><span className="demo-badge">DEVELOPMENT MVP</span><span className="privacy-label"><ShieldCheck size={15} /> Destination protected</span><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" title="OpenStreetMap attribution">OpenStreetMap <ArrowUpRight size={13} /></a><button className="header-menu-button" type="button" aria-label="Open map sessions" aria-expanded={sessionsOpen} title="Map sessions" onClick={() => setSessionsOpen((open) => !open)}><Menu size={22} /></button></nav>
     </header>

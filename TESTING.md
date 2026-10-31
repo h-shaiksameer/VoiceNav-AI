@@ -67,7 +67,7 @@ Server fixtures advance mocked time and use unique cache keys. Do not introduce 
 
 ## Latest Validation
 
-The current suite passes 354 tests: 343 client/unit/UI tests and 11 server tests. TypeScript and repository-wide lint pass. The complete coverage command currently reports 99.10% statements, 99.10% lines, 97.86% functions and 94.75% branches, so the 95% branch gate remains outstanding by 0.25 points. The DOM/audio tests simulate browser events; they are not live microphone verification.
+The current suite passes 357 tests: 345 client/unit/UI tests and 12 server tests. TypeScript and repository-wide lint pass. The last complete coverage run reported 99.10% statements, 99.10% lines, 97.86% functions and 94.75% branches, so the 95% branch gate remains outstanding by 0.25 points; rerun coverage after adding new tests. The DOM/audio tests simulate browser events; they are not live microphone verification.
 
 Playwright checks against the running Next.js app passed at 1440 x 1000 and 390 x 844: simulated 502 availability, disabled controls with enabled retry, recovery after a valid response, shared status updates from a conversational search, labeled retained results and no horizontal/control overflow. Map tiles rendered. API responses were intercepted locally for these checks and removed afterward; this does not assert live Nominatim/OSRM/Overpass uptime.
 
