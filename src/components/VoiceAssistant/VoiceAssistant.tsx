@@ -35,7 +35,7 @@ export function VoiceAssistant({ engine, blocked, onBusyChange, active = true }:
   const [mapVoiceTranscript, setMapVoiceTranscript] = useState("");
   const [interruptionReady, setInterruptionReady] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
-  const [uiControlHost, setUiControlHost] = useState<HTMLElement | null>(null);
+  const uiControlHost = active && typeof document !== "undefined" ? document.getElementById("ui-control-slot") : null;
   const abortListening = useRef<(() => void) | null>(null);
   const stopSpeaking = useRef<(() => void) | null>(null);
   const stopInterruption = useRef<(() => void) | null>(null);
@@ -67,10 +67,6 @@ export function VoiceAssistant({ engine, blocked, onBusyChange, active = true }:
     ? allowInterruptions && !interruptionReady ? "Starting microphone" : `Listening · ${sendPhrase} / Discard`
     : status === "responding" && allowInterruptions ? interruptionReady ? "Speaking · Interruptible" : "Starting microphone"
     : status === "idle" && input.trim() ? "Draft ready" : status.charAt(0).toUpperCase() + status.slice(1);
-
-  useEffect(() => {
-    setUiControlHost(active ? document.getElementById("ui-control-slot") : null);
-  }, [active]);
 
   useEffect(() => {
     panelOpen.current = true;
@@ -441,7 +437,7 @@ export function VoiceAssistant({ engine, blocked, onBusyChange, active = true }:
             abortListening.current?.();
             abortListening.current = null;
             void submit(text, true);
-          }, 3000);
+            }, 2000);
         }
       },
       completeOnFinal: false,
@@ -504,7 +500,7 @@ export function VoiceAssistant({ engine, blocked, onBusyChange, active = true }:
     optionAutoSubmit.current = setTimeout(() => {
       optionAutoSubmit.current = null;
       void submit(text, true);
-    }, 3000);
+    }, 2000);
   }
 
   useEffect(() => {
@@ -519,7 +515,7 @@ export function VoiceAssistant({ engine, blocked, onBusyChange, active = true }:
   const uiControlButton = <div className="map-voice-header-control"><button type="button" className={`ui-control-button ${uiControlActive ? "active" : ""}`} title={uiControlActive ? "Disable map voice" : "Enable map voice"} aria-label={uiControlActive ? "Map voice enabled. Click to disable" : "Map voice disabled. Click to enable"} aria-pressed={uiControlActive} onClick={toggleUiControl} disabled={!voiceSupported || (blocked && !uiControlActive && state !== "listening")}><Layers size={15} /><span>Map voice: {uiControlActive ? "Enabled" : "Disabled"}</span></button>{uiControlActive && mapVoiceTranscript && <span className="map-voice-transcript" role="status" aria-live="polite">{mapVoiceTranscript}</span>}</div>;
 
   return <>
-    {uiControlHost && createPortal(uiControlButton, uiControlHost)}
+    {uiControlHost ? createPortal(uiControlButton, uiControlHost) : uiControlButton}
     <section className={`assistant-panel ${collapsed ? "assistant-collapsed" : ""}`} aria-labelledby="assistant-title">
     <header className="assistant-header"><span className={`assistant-symbol ${state === "listening" ? "listening" : ""}`}><AudioLines size={21} /></span><div><h2 id="assistant-title">VoiceNav assistant</h2><span className={`assistant-status state-${status}`}><i />{statusLabel}</span></div><button className="icon-button" onClick={() => { if (collapsed) { if (uiControlMode.current) { uiControlMode.current = false; setUiControlActive(false); engine.clearUiControl(); stopVoice(); } } else { voiceConversation.current = false; setContinuousListening(false); if (!uiControlMode.current && (state === "listening" || state === "responding")) stopVoice(); } setCollapsed(!collapsed); }} aria-expanded={!collapsed} aria-label={collapsed ? "Expand assistant" : "Collapse assistant"} title={collapsed ? "Expand assistant" : "Collapse assistant"}>{collapsed ? <ChevronUp size={18} /> : <ChevronDown size={18} />}</button></header>
     {!collapsed && <>

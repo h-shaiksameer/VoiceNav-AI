@@ -10,7 +10,7 @@ const levelToken = `(?:\\d+|${[...levelWords.keys()].join("|")})`;
 function levelAmount(value: string | undefined): number {
   if (!value) return 1;
   const numeric = Number(value);
-  return Math.max(1, Number.isNaN(numeric) ? (levelWords.get(value.toLowerCase()) ?? 1) : numeric);
+  return Math.max(1, Number.isNaN(numeric) ? levelWords.get(value.toLowerCase())! : numeric);
 }
 
 function cleanQuery(text: string): string {
@@ -31,8 +31,9 @@ export function parseUiControlCommand(text: string): UiControlCommand | null {
     .replace(/\b(?:inn+|in+|outt+)\b/giu, (word) => word.toLowerCase().startsWith("out") ? "out" : "in")
     .replace(/[.!?]+$/u, "")
     .trim();
-  const lastZoom = clean.match(new RegExp(`(?:^|.*\\s)(zoom(?:\\s+(?:in|out))?(?:\\s+(?:by\\s+)?(?:level\\s+)?${levelToken}(?:\\s+levels?)?)?(?:\\s+.*)?)$`, "iu"))?.[1];
-  if (lastZoom && lastZoom !== clean) return parseUiControlCommand(lastZoom);
+  const zoomMatches = [...clean.matchAll(/\bzoom\b/giu)];
+  const lastZoomIndex = zoomMatches.at(-1)?.index ?? 0;
+  if (lastZoomIndex > 0) return parseUiControlCommand(clean.slice(lastZoomIndex));
   if (/^(?:please )?(?:reset|restore)(?: the)? map(?: view)?$/iu.test(clean)) return { action: "reset" };
 
   const zoom = clean.match(new RegExp(`^(?:please\\s+)?zoom(?:\\s+(in|out))?(?:\\s+(?:by\\s+)?(?:level\\s+)?(${levelToken})(?:\\s+levels?)?)?(?:\\s+(.+))?$`, "iu"));
@@ -45,15 +46,10 @@ export function parseUiControlCommand(text: string): UiControlCommand | null {
   const center = clean.match(/^(?:please )?(?:move|center|recenter)(?: the)? map(?: view)?\s+(?:to|at|on|near)\s+(.+)$/iu);
   if (center) return { action: "center", query: center[1].trim() };
 
-  const pan = clean.match(new RegExp(`(?:^|.*\\s)((?:please\\s+)?(?:(?:move|shift)(?: the)?(?: map| view)?|pan(?: the)?(?: map| view)?)?\\s*(left|right|up(?:wards?)?|down(?:wards?)?)(?:\\s+(?:by\\s+)?(?:level\\s+)?(${levelToken})(?:\\s+levels?)?)?)(?:\\s+(?:please|now|thanks|thank you))?$`, "iu"));
+  const pan = clean.match(new RegExp(`(?:^|.*\\s)((?:please\\s+)?(?:(?:move|shift)(?: the)?(?: map| view| screen)?|pan(?: the)?(?: map| view| screen)?)?\\s*(left|right|up(?:wards?)?|down(?:wards?)?)(?:\\s+(?:by\\s+)?(?:level\\s+)?(${levelToken})(?:\\s+levels?)?)?)(?:\\s+(?:please|now|thanks|thank you))?$`, "iu"));
   if (pan) {
     const direction = pan[2].toLowerCase().replace(/wards?$/u, "");
     return { action: `pan-${direction}` as UiControlCommand["action"], amount: levelAmount(pan[3]) };
-  }
-  const panDirection = clean.match(new RegExp(`(?:^|\\s)(left|right|up(?:wards?)?|down(?:wards?)?)(?:\\s+(?:by\\s+)?(?:level\\s+)?(${levelToken})(?:\\s+levels?)?)?\\s*(?:please|now|thanks|thank you)?$`, "iu"));
-  if (panDirection && (clean === panDirection[0].trim() || /\b(?:move|shift|pan)\b/iu.test(clean))) {
-    const direction = panDirection[1].toLowerCase().replace(/wards?$/u, "");
-    return { action: `pan-${direction}` as UiControlCommand["action"], amount: levelAmount(panDirection[2]) };
   }
   return null;
 }

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { cached, serializedGeocode, ServiceError, upstream } from "@/services/server/http";
 import { countryCodeSchema } from "@/types/schemas";
 import type { Coordinates, Location } from "@/types/domain";
+import { distanceBetween } from "@/utils/geo";
 
 const responseSchema = z.array(z.object({
   place_id: z.number(), osm_type: z.string().optional(), osm_id: z.number().optional(),
@@ -37,11 +38,14 @@ export async function geocode(query: string, identity: string, reference?: Coord
     const baseUrl = `${(process.env.NOMINATIM_BASE_URL || "https://nominatim.openstreetmap.org").replace(/\/$/, "")}/`;
     for (const candidate of phoneticQueries(query)) {
       const url = new URL("search", baseUrl);
-      const params = new URLSearchParams({ q: candidate, format: "jsonv2", limit: "5", addressdetails: "1", "accept-language": "en" });
+      const params = new URLSearchParams({ q: candidate, format: "jsonv2", limit: "50", addressdetails: "1", "accept-language": "en" });
       if (country) params.set("countrycodes", country);
       url.search = params.toString();
       const results = responseSchema.parse(await upstream(url, identity)).filter((item) => !country || item.address?.country_code === country);
-      if (results.length) return results.map((item) => ({ id: item.osm_type && item.osm_id ? `osm:${item.osm_type}:${item.osm_id}` : `nominatim:${item.place_id}`, lat: item.lat, lon: item.lon, name: item.display_name, countryCode: item.address?.country_code }));
+      if (results.length) {
+        const locations = results.map((item) => ({ id: item.osm_type && item.osm_id ? `osm:${item.osm_type}:${item.osm_id}` : `nominatim:${item.place_id}`, lat: item.lat, lon: item.lon, name: item.display_name, countryCode: item.address?.country_code }));
+        return (reference ? locations.sort((first, second) => distanceBetween(reference, first) - distanceBetween(second, reference)) : locations).slice(0, 20);
+      }
     }
     return [];
   }));

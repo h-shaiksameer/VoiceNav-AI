@@ -117,7 +117,7 @@ test("Nominatim filters countries, resolves GPS country, preserves IDs, and cach
   assert.equal(scoped[0].id, "osm:node:55");
   assert.equal(scoped[0].countryCode, "in");
   assert.equal(requests[1].searchParams.get("countrycodes"), "in");
-  assert.equal(requests[1].searchParams.get("limit"), "5");
+  assert.equal(requests[1].searchParams.get("limit"), "50");
   await geocode("Scoped fixture", "test", { lat: 17, lon: 78 });
   assert.equal(requests.length, 2);
   const global = await geocode("Global fixture", "test");
@@ -129,6 +129,25 @@ test("Nominatim filters countries, resolves GPS country, preserves IDs, and cach
   await assert.rejects(geocode("Missing country", "test", { lat: 19, lon: 79 }), /country could not be verified/);
   context.mock.method(globalThis, "fetch", async () => Response.json([{ place_id: 1, lat: 999, lon: 0, display_name: "Invalid" }]));
   await assert.rejects(geocode("Invalid coordinates", "test"));
+});
+
+test("Nominatim ranks a wider local candidate set by the supplied GPS reference", async (context) => {
+  let now = Date.now() + 2_000_000;
+  context.mock.method(Date, "now", () => { now += 6000; return now; });
+  context.mock.method(globalThis, "fetch", async (value: string | URL) => {
+    const url = new URL(value);
+    if (url.pathname.endsWith("reverse")) return Response.json({ address: { country_code: "in" } });
+    return Response.json([
+      { place_id: 10, lat: "25", lon: "80", display_name: "Bahadurpura, Other State, India", address: { country_code: "in" } },
+      { place_id: 11, lat: "17.36", lon: "78.47", display_name: "Bahadurpura, Hyderabad, Telangana, India", address: { country_code: "in" } },
+      { place_id: 12, lat: "24", lon: "72", display_name: "Bahadurpura, Distant State, India", address: { country_code: "in" } },
+      { place_id: 13, lat: "51", lon: "0", display_name: "Bahadurpura, United Kingdom", address: { country_code: "gb" } },
+    ]);
+  });
+  const results = await geocode("Bahadurpura near Hyderabad", "test", { lat: 17.36, lon: 78.47 });
+  assert.equal(results[0].name, "Bahadurpura, Hyderabad, Telangana, India");
+  assert.equal(results.every((location) => location.countryCode === "in"), true);
+  assert.equal(results.length, 3);
 });
 
 test("OSRM request order, alternatives bounds, and no-route failures are validated", async (context) => {

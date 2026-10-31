@@ -3,7 +3,7 @@ import { NavigationController } from "@/navigation/NavigationController";
 import { IntentProcessor } from "@/ai/IntentProcessor";
 import { categoryLabel } from "@/utils/categories";
 import { distanceBetween, formatDistance, formatDuration } from "@/utils/geo";
-import { currentLocationReference, destinationInstruction, lastOptionIndex, normalizeLanguage, routeInstruction } from "@/navigation/commands";
+import { currentLocationReference, destinationInstruction, lastOptionIndex, normalizeLanguage, routeInstruction, skipInstruction } from "@/navigation/commands";
 import { HINDI_VOICE_SEND_PHRASE, VOICE_SEND_PHRASE, voiceRequest } from "@/services/voice/browserVoice";
 import { locationSchema } from "@/types/schemas";
 import { detectLanguage, hindiConfirmation, type AssistantLanguage } from "@/ai/language";
@@ -166,8 +166,7 @@ export class ConversationEngine {
       return `Moved the map to the nearest ${nearestFirst[0].name}. Your route and destination are unchanged.`;
     }
     if (matches.length > 1) {
-      const action = command.action === "center" || command.action === "zoom-in" || command.action === "zoom-out" ? command.action : "center";
-      this.update({ ...this.context, pendingLocationChoices: matches.slice(0, 5), pendingMapAction: action, pendingDestination: null, pendingOrigin: null, pendingSourceText: null, pendingRevision: this.navigation.getSnapshot().revision });
+      this.update({ ...this.context, pendingLocationChoices: matches.slice(0, 5), pendingMapAction: "center", pendingDestination: null, pendingOrigin: null, pendingSourceText: null, pendingRevision: this.navigation.getSnapshot().revision });
       return this.mapChoicesText(matches.slice(0, 5));
     }
     this.callbacks.onMapCommand?.({ action: command.action, amount: command.amount, location: matches[0] });
@@ -189,7 +188,7 @@ export class ConversationEngine {
     const names = choices.map((location) => location.name);
     const order = "nearest first by straight-line distance from your starting location";
     const hindiOrder = "शुरुआती जगह से सीधी दूरी के हिसाब से पास वाली पहले";
-    return this.say(`I found ${choices.length} destination matches, ${order}. ${names.map((name, index) => `Option ${index + 1}: ${name}`).join(". ")}. Say the option number. I will process it after three seconds. I have not changed your route.`, `${choices.length} जगहें मिली हैं, ${hindiOrder} है। ${names.map((name, index) => `विकल्प ${index + 1}: ${name}`).join("। ")}। विकल्प का नंबर बोलिए। तीन सेकंड बाद इसे प्रोसेस करूँगा। अभी रास्ता नहीं बदला है।`);
+    return this.say(`I found ${choices.length} destination matches, ${order}. ${names.map((name, index) => `Option ${index + 1}: ${name}`).join(". ")}. Say the option number. I will process it after two seconds. Say Skip to discard this request.`, `${choices.length} जगहें मिली हैं, ${hindiOrder} है। ${names.map((name, index) => `विकल्प ${index + 1}: ${name}`).join("। ")}। विकल्प का नंबर बोलिए। दो सेकंड बाद इसे प्रोसेस करूँगा। नया पता पूछने के लिए स्किप बोलिए।`);
   }
 
   private async resolveDestinations(locations: Location[], sourceText: string, revision: number, origin: Location | null): Promise<string> {
@@ -233,7 +232,7 @@ export class ConversationEngine {
     const action = pendingMapAction;
     this.clearPending();
     this.callbacks.onMapCommand?.({ action, location });
-    return `Moved the map to ${location.name} and zoomed ${action === "zoom-in" ? "in" : "out"}.`;
+    return `Moved the map to ${location.name}.`;
   }
 
   async chooseLocation(index: number): Promise<string> {
@@ -284,6 +283,7 @@ export class ConversationEngine {
     try {
       const shortReply = clean.replace(/[,!.?]+/g, " ").replace(/\s+/g, " ").trim();
       const hindiAnswer = hindiConfirmation(clean);
+      if (skipInstruction(clean) && (this.context.pendingDestination || this.context.pendingLocationChoices.length)) return this.cancel("Skipped. Please give me a new destination.", "ठीक है, इसे छोड़ दिया। कृपया नई मंज़िल बताइए।");
       if (hindiAnswer === "yes" || /^(?:yes(?: please| confirm(?: (?:the )?(?:route|destination))?| go ahead)?|confirm(?: (?:the )?(?:route|destination))?|go ahead)$/i.test(shortReply)) {
         if (this.context.pendingDestination) return await this.commitPending();
         if (this.context.pendingLocationChoices.length) return this.reply(this.say("Which destination match? Say option one, option two, or another listed option number.", "कौन सी जगह? विकल्प एक, विकल्प दो, या सूची का नंबर बोलिए।"));

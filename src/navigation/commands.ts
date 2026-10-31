@@ -72,6 +72,12 @@ export function stopInstruction(text: string): boolean {
   return /^(?:please )?(?:(?:can|could|would) you (?:please )?)?(?:stop|cancel|end|clear) (?:navigation|(?:the |my )?(?:route|route preview|navigation))[.!?]*$/i.test(normalizeLanguage(text));
 }
 
+export function skipInstruction(text: string): boolean {
+  const raw = normalizeLanguage(text);
+  const clean = normalizeHindi(raw);
+  return /^(?:please\s+)?(?:skip(?:\s+(?:this|it|karo|kar do|karna))?|chhodo|chhod do)$/iu.test(clean) || /^(?:please\s+)?(?:छोड़ो|छोड़\s+(?:दो|do)|छोड़ दीजिए)$/iu.test(raw);
+}
+
 const ordinalWords = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth", "eleventh", "twelfth"];
 const numberWords = ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"];
 const resultNoun = "(?:one|result|option|place|restaurant|cafe|hospital|pharmacy|atm|station|petrol station|gas station|petrol pump|fuel pump|parking|charger|charging station)s?";

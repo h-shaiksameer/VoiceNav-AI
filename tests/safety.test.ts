@@ -1584,6 +1584,26 @@ test("an explicit spoken address choice confirms the requested route without ano
   assert.doesNotMatch(reply, /say confirm|change your destination|plan a driving route/i);
 });
 
+test("Skip discards destination options without changing the journey and allows a new destination", async (context) => {
+  const otherDestination = { ...destination, id: "test:other", name: "Other test address" };
+  mockServices(context, undefined, [destination, otherDestination]);
+  const navigation = await controllerFixture();
+  const previous = navigation.getSnapshot();
+  const engine = engineFixture(navigation);
+  await engine.send("Destination Bahadurpura");
+  assert.equal(engine.getSnapshot().pendingLocationChoices.length, 2);
+  const skipped = await engine.send("Skip");
+  assert.match(skipped, /new destination/i);
+  assert.equal(engine.getSnapshot().pendingLocationChoices.length, 0);
+  assert.equal(engine.getSnapshot().pendingDestination, null);
+  assert.strictEqual(navigation.getSnapshot(), previous);
+  await engine.send("Destination New address");
+  assert.equal(engine.getSnapshot().pendingLocationChoices.length, 2);
+  await engine.send("छोड़ दो");
+  assert.equal(engine.getSnapshot().pendingLocationChoices.length, 0);
+  assert.strictEqual(navigation.getSnapshot(), previous);
+});
+
 for (const [selection, expected] of [
   ["Option one option one option two Submit", 1],
   ["Option 2 option 2 option 1 Submit", 0],

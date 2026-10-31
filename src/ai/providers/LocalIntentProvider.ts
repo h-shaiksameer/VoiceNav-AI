@@ -3,6 +3,7 @@ import type { Intent } from "@/types/domain";
 import { matchingCategories } from "@/utils/categories";
 import { detectLanguage, hindiNegation, normalizeHindi } from "../language";
 import { ambiguousReference, contextualReference, destinationInstruction, distanceBetweenInstruction, normalizeLanguage, routeInstruction, stopInstruction } from "@/navigation/commands";
+import { parseUiControlCommand } from "@/navigation/uiControl";
 
 export class LocalIntentProvider implements AIProvider {
   readonly label = "Local English, Hindi and Hinglish intent processor";
@@ -10,6 +11,7 @@ export class LocalIntentProvider implements AIProvider {
 
   async process({ text, context }: IntentInput): Promise<Intent> {
     const clean = normalizeLanguage(text);
+    if (parseUiControlCommand(clean)) return { type: "CLARIFY", clarification: "Map controls are available only in Map voice mode." };
     const plan = routeInstruction(clean);
     if (plan) return { type: "PLAN_ROUTE", ...plan };
     const distanceBetween = distanceBetweenInstruction(clean);

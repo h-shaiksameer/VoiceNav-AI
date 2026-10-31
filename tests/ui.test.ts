@@ -191,6 +191,25 @@ test("normal voice mode reopens the microphone after Nova asks for a destination
   assert.equal(view.getByRole("button", { name: "Stop recording and keep draft" }) !== null, true);
 });
 
+test("destination option voice auto-submits after two seconds of silence", async (context) => {
+  const window = browser(context);
+  Object.assign(window, { SpeechRecognition: Recognition });
+  context.mock.timers.enable({ apis: ["setTimeout"] });
+  const calls: string[] = [];
+  const snapshot = { ...emptyContext(), pendingLocationChoices: [{ id: "place:one", name: "First place", lat: 1, lon: 2 }] };
+  const engine = { subscribe: () => () => {}, getSnapshot: () => snapshot, getSpokenText: (text: string) => text, send: async (text: string) => { calls.push(text); return "Selected."; }, clearUiControl: () => {} } as unknown as ConversationEngine;
+  const view = render(createElement(VoiceAssistant, { engine, blocked: false, onBusyChange: () => {} }));
+  fireEvent.click(view.getByLabelText("Spoken replies"));
+  await act(async () => { fireEvent.click(view.getByRole("button", { name: "Start voice input" })); });
+  Recognition.latest.onresult?.({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: "Option one" } }] });
+  context.mock.timers.tick(1999);
+  assert.deepEqual(calls, []);
+  context.mock.timers.tick(1);
+  await act(async () => {});
+  assert.deepEqual(calls, ["Option one"]);
+  assert.ok(view);
+});
+
 test("map voice owns a separate microphone turn and does not send navigation text", async (context) => {
   const window = browser(context);
   Object.assign(window, { SpeechRecognition: Recognition });
@@ -206,7 +225,7 @@ test("map voice owns a separate microphone turn and does not send navigation tex
   await act(async () => {
     recognition.onresult?.({ resultIndex: 0, results: [{ isFinal: false, 0: { transcript: "move right" } }] });
   });
-  assert.ok(view.getByRole("status", { name: "move right" }));
+  assert.match(view.getByRole("status").textContent ?? "", /move right/);
   await act(async () => {
     recognition.onresult?.({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: "zoom in submit" } }] });
     await new Promise<void>((resolve) => setImmediate(resolve));

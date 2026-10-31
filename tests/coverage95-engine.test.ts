@@ -91,7 +91,7 @@ test("map zoom commands target locations, resolve choices, and reset independent
   assert.match(await engine.executeUiControl("reset map"), /Map control applied/);
   assert.deepEqual(commands.map((command) => command.action), ["zoom-in", "zoom-out", "zoom-in", "zoom-out", "reset"]);
   assert.equal(commands[2].location?.id, "place:hyderabad");
-  assert.equal(commands[3].location?.id, "place:hyderabad");
+  assert.equal(commands[3].location?.id, "place:hyderabad-two");
   await engine.executeUiControl("move up");
   await engine.executeUiControl("move down");
   assert.deepEqual(commands.slice(-2).map((command) => command.action), ["pan-up", "pan-down"]);
@@ -106,6 +106,39 @@ test("map zoom commands target locations, resolve choices, and reset independent
   const noCallbackChoices = engineFor(new NavigationController(async () => structuredClone(route)), { searchLocations: async () => matches });
   assert.match(await noCallbackChoices.executeUiControl("zoom in at Hyderabad"), /nearest Hyderabad/);
   assert.equal(noCallbackChoices.getSnapshot().pendingMapAction, null);
+});
+
+test("map voice centers ambiguous locations through its own option flow", async () => {
+  const places: Location[] = [
+    { id: "place:one", name: "One City", lat: 17.385, lon: 78.4867 },
+    { id: "place:two", name: "Two City", lat: 17.4, lon: 78.5 },
+  ];
+  const commands: Array<{ action: string; location?: Location }> = [];
+  const engine = engineFor(await activeNavigation(), { searchLocations: async () => places }, { onMapCommand: (command) => commands.push(command) });
+  assert.match(await engine.executeUiControl("center map on City"), /2 places matching/);
+  assert.equal(engine.getSnapshot().pendingMapAction, "center");
+  assert.match(await engine.executeUiControl("option 9"), /not one of the listed/);
+  assert.match(await engine.executeUiControl("option 1"), /Moved the map/);
+  assert.equal(commands[0].action, "center");
+  assert.equal(commands[0].location?.id, "place:one");
+});
+
+test("map voice handles unsupported commands and location lookup without a reference or callback", async () => {
+  const locations: Location[] = [{ id: "place:solo", name: "Solo City", lat: 1, lon: 2 }];
+  const navigation = new NavigationController(async () => structuredClone(route));
+  const engine = new ConversationEngine(navigation, { onPlaces: () => {}, onSelectPlace: () => {}, onDetours: () => {}, getReferenceLocation: () => null }, {
+    ...services({ searchLocations: async () => locations }),
+  });
+  assert.match(await engine.executeUiControl("show me the map"), /control the map/);
+  assert.match(await engine.executeUiControl("center map on Solo City"), /Moved the map to Solo City/);
+});
+
+test("conversation engine preserves informational responses without navigation mutation", async () => {
+  const engine = engineFor(await activeNavigation());
+  for (const request of ["How long will it take?", "How far is my destination?", "Is there traffic?", "Find restaurants nearby", "Check other routes"]) {
+    assert.ok((await engine.send(request)).length > 0);
+  }
+  assert.equal(engine.getSnapshot().pendingDestination, null);
 });
 
 test("a device-location origin is reported to the caller before destination search", async () => {
