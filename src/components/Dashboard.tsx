@@ -2,6 +2,7 @@
 
 import { startTransition, useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { ArrowUpRight, Compass, Menu, Radio, Route as RouteIcon, ShieldCheck, Trash2, WifiOff } from "lucide-react";
 import { RoutePanel } from "@/components/RoutePanel/RoutePanel";
 import { PlaceResults } from "@/components/PlaceResults/PlaceResults";
@@ -105,7 +106,7 @@ export function Dashboard() {
     <a className="skip-link" href="#journey">Skip to route planner</a>
     <header className="app-header">
       <button className="header-menu-button" type="button" aria-label="Open journey planner and sessions" aria-expanded={mobileSidebarOpen} aria-controls="journey-sidebar" title="Journey planner and sessions" onClick={() => setMobileSidebarOpen((open) => !open)}><Menu size={22} /></button>
-      <Link className="brand" href="/" aria-label="VoiceNav AI home"><span className="brand-symbol"><img src="/voicenav-badge.png" alt="" /></span><span>VoiceNav<span className="brand-ai">AI</span></span></Link>
+      <Link className="brand" href="/" aria-label="VoiceNav AI home"><span className="brand-symbol"><Image src="/voicenav-badge.png" alt="" width={40} height={40} priority /></span><span>VoiceNav<span className="brand-ai">AI</span></span></Link>
       <div className="header-divider" /><span className="header-caption">A clearer way forward.</span>
       <nav className="header-meta" aria-label="Application status"><span id="ui-control-slot" /><span className="demo-badge">DEVELOPMENT MVP</span><span className="privacy-label"><ShieldCheck size={15} /> Destination protected</span><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" title="OpenStreetMap attribution">OpenStreetMap <ArrowUpRight size={13} /></a></nav>
     </header>
