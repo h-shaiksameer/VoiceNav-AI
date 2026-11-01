@@ -15,6 +15,9 @@ export const basetenIntentRequestSchema = z.object({
 
 export type AIIntentRequest = z.infer<typeof basetenIntentRequestSchema>;
 const geminiModel = process.env.GEMINI_MODEL?.trim() || "gemini-3.5-flash-lite";
+const museModel = process.env.BASETEN_MODEL?.trim() || "meta-models/muse-spark-open";
+const metaModel = process.env.META_MODEL?.trim() || "muse-spark-open";
+const metaApiBaseUrl = (process.env.META_API_BASE_URL?.trim() || "https://api.llama.com/v1").replace(/\/$/, "");
 const modelRequestTimeoutMs = 15000;
 
 export const intentSystemPrompt = `You are the intent classifier inside VoiceNav AI. The user's original words are in the request field. Understand that message and return only one JSON object matching this shape:
@@ -53,10 +56,9 @@ export async function inferBasetenIntent(input: AIIntentRequest): Promise<z.infe
   const client = new OpenAI({ apiKey, baseURL: "https://inference.baseten.co/v1", maxRetries: 0, timeout: modelRequestTimeoutMs });
   try {
     const completion = await client.chat.completions.create({
-      model: "meta-models/muse-spark-open",
+      model: museModel,
       temperature: 0,
       max_tokens: 180,
-      response_format: { type: "json_object" },
       messages: [{ role: "system", content: intentSystemPrompt }, { role: "user", content: intentPromptFor(input) }],
     });
     const content = completion.choices[0]?.message?.content;
@@ -67,6 +69,40 @@ export async function inferBasetenIntent(input: AIIntentRequest): Promise<z.infe
     const status = error instanceof OpenAI.APIError && error.status === 429 ? 429 : 502;
     console.warn("[VoiceNav AI] Muse Spark request failed; local engine is handling this request.", { status, reason: error instanceof Error ? error.message : "unknown error" });
     throw new ServiceError(status === 429 ? "Muse Spark is rate limited. The local engine is active." : "Muse Spark is unavailable. The local engine is active.", status);
+  }
+}
+
+export async function inferMetaIntent(input: AIIntentRequest): Promise<z.infer<typeof intentSchema>> {
+  const apiKey = process.env.META_API_KEY?.trim();
+  if (!apiKey) throw new ServiceError("Meta Model API is not configured. The local engine is active.", 503);
+  try {
+    const response = await fetch(`${metaApiBaseUrl}/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: metaModel,
+        temperature: 0,
+        max_tokens: 180,
+        messages: [{ role: "system", content: intentSystemPrompt }, { role: "user", content: intentPromptFor(input) }],
+      }),
+      signal: AbortSignal.timeout(modelRequestTimeoutMs),
+    });
+    if (response.status === 429) {
+      console.warn("[VoiceNav AI] Meta Model API request was rate limited; local engine is handling this request.");
+      throw new ServiceError("Meta AI is rate limited. The local engine is active.", 429);
+    }
+    if (!response.ok) {
+      console.warn("[VoiceNav AI] Meta Model API request failed; local engine is handling this request.", { model: metaModel, status: response.status });
+      throw new ServiceError("Meta AI is unavailable. The local engine is active.", 502);
+    }
+    const payload = await response.json() as { choices?: Array<{ message?: { content?: string | null } }> };
+    const content = payload.choices?.[0]?.message?.content;
+    if (!content) throw new ServiceError("Meta AI returned no structured intent.", 502);
+    return parseIntentContent(content);
+  } catch (error) {
+    if (error instanceof ServiceError) throw error;
+    console.warn("[VoiceNav AI] Meta Model API request failed; local engine is handling this request.", { model: metaModel, reason: error instanceof Error ? error.message : "unknown error" });
+    throw new ServiceError("Meta AI is unavailable. The local engine is active.", 502);
   }
 }
 
@@ -107,7 +143,8 @@ function enabled(value: string | undefined): boolean {
   return ["on", "true", "1", "yes"].includes(value?.trim().toLowerCase() ?? "");
 }
 
-export async function inferConfiguredIntent(input: AIIntentRequest): Promise<{ intent: z.infer<typeof intentSchema>; provider: "gemini" | "muse" }> {
+export async function inferConfiguredIntent(input: AIIntentRequest): Promise<{ intent: z.infer<typeof intentSchema>; provider: "gemini" | "muse" | "meta" }> {
+  if (enabled(process.env.META_ENABLED) && process.env.META_API_KEY?.trim()) return { intent: await inferMetaIntent(input), provider: "meta" };
   if (enabled(process.env.GEMINI_ENABLED) && process.env.GEMINI_API_KEY?.trim()) return { intent: await inferGeminiIntent(input), provider: "gemini" };
   if (enabled(process.env.BASETEN_ENABLED) && process.env.BASETEN_API_KEY?.trim()) return { intent: await inferBasetenIntent(input), provider: "muse" };
   throw new ServiceError("No optional AI provider is enabled. The local engine is active.", 503);

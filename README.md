@@ -57,11 +57,32 @@ ConversationEngine
 
 Provider order:
 
-1. The primary optional model provider is selected when configured.
-2. The alternate model provider is used when the primary provider is unavailable.
-3. The deterministic local English/Hindi/Hinglish processor handles the request when optional providers fail or are not configured.
+1. The first-party Meta Model API is selected when `META_ENABLED=on` and a Meta API key is present.
+2. Gemini is selected when it is enabled and configured.
+3. Baseten-hosted Muse is selected when it is enabled and configured.
+4. The deterministic local English/Hindi/Hinglish processor handles the request when optional providers fail or are not configured.
 
 The server validates model JSON with Zod. The local processor applies additional rules for destination wording, references, categories, negation, ambiguity, and route safety. A destination change requires either confirmation or a valid pending result selection before the active journey changes.
+
+## Model Provider Compatibility
+
+VoiceNav supports provider credentials through server-side adapters rather than sending keys to the browser. The supported paths are:
+
+| Credential type | Provider path | Model configuration | Status |
+| --- | --- | --- | --- |
+| First-party Meta API key | Meta Model API | `META_MODEL`, defaulting to `muse-spark-open` | Supported |
+| Baseten API key | Baseten OpenAI-compatible Model API | `BASETEN_MODEL`, defaulting to `meta-models/muse-spark-open` | Supported |
+| Gemini API key | Google Gemini API | `GEMINI_MODEL` | Supported |
+
+This means the repository is ready for a future Meta API key without a code rewrite. Enable the Meta provider, provide the credential through the server environment, restart the application, and the same intent schema, local safety checks, route execution, speech workflow, and fallback behavior remain in place. The key is never included in client requests or model prompts.
+
+The phrase “any API key” is intentionally limited to a valid key for one of these supported provider contracts. A key from an unrelated service cannot work unless that service exposes a compatible adapter, endpoint, authentication method, and response format.
+
+### Hackathon Readiness
+
+For a Meta-focused submission, configure the first-party Meta provider and use a supported Meta model such as Muse through the Meta Model API. The application records the provider path in its server response and keeps the model's role auditable: Meta interprets the user's language, while local code validates the intent and performs navigation actions.
+
+This architecture is designed to satisfy common hackathon expectations around meaningful use of the sponsor model, demonstrable product behavior, and safe integration. Final eligibility still depends on the named event's current rules, required model versions, judging rubric, attribution requirements, and submission evidence. The README does not include credentials or credential values.
 
 ## Local Setup
 
@@ -203,6 +224,7 @@ This boundary is intentional: the model can understand varied language, while lo
 | OSRM | Driving routes, distance, duration, and alternatives |
 | Overpass | Nearby and along-route OpenStreetMap place search |
 | Gemini | Optional server-side intent classification |
+| Meta Model API | Optional first-party Meta intent classification, including configurable Muse models |
 | Baseten Muse Spark Open | Optional alternate intent classification |
 
 These are public or third-party services with rate limits and no guaranteed uptime. The application uses bounded requests, caching, validation, and error handling, but it does not provide production-scale global rate limiting across serverless instances.
@@ -222,7 +244,7 @@ Implemented:
 - Read-only alternative route previews.
 - Multi-stop route optimization.
 - English text and browser voice workflows.
-- Optional Gemini/Muse classification with local fallback.
+- Optional Meta, Gemini, and Baseten Muse classification with local fallback.
 
 Not implemented:
 

@@ -2,7 +2,7 @@ import type { ConversationContext, NavigationSession } from "@/types/domain";
 
 export type IntentInput = { text: string; context: ConversationContext; session: NavigationSession };
 export type AIProviderStatus = "local" | "checking" | "connected" | "unavailable";
-export type AIModelProvider = "gemini" | "muse";
+export type AIModelProvider = "gemini" | "muse" | "meta";
 
 export interface AIProvider {
   readonly label: string;

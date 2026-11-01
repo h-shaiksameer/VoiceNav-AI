@@ -64,7 +64,7 @@ export class BasetenIntentProvider implements AIProvider {
       }
       const payload = await response.json() as { intent?: unknown; provider?: AIModelProvider };
       const parsed = intentSchema.safeParse(payload.intent);
-      if (!parsed.success || (payload.provider !== "gemini" && payload.provider !== "muse")) {
+      if (!parsed.success || (payload.provider !== "gemini" && payload.provider !== "muse" && payload.provider !== "meta")) {
         this.setStatus("unavailable");
         throw new Error("Meta AI returned an invalid intent. The local engine is handling this request.");
       }

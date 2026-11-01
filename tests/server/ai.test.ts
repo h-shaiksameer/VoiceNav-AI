@@ -103,6 +103,35 @@ test("server route reports missing configuration without calling upstream", asyn
   }
 });
 
+test("Meta Model API is selected with its own key and model configuration", async (context) => {
+  const previousKey = process.env.META_API_KEY;
+  const previousEnabled = process.env.META_ENABLED;
+  const previousModel = process.env.META_MODEL;
+  process.env.META_API_KEY = "meta-test-key";
+  process.env.META_ENABLED = "on";
+  process.env.META_MODEL = "muse-spark-open";
+  context.mock.method(globalThis, "fetch", async (url: string | URL, init: RequestInit) => {
+    assert.match(String(url), /api\.llama\.com\/v1\/chat\/completions/);
+    assert.equal(new Headers(init.headers).get("authorization"), "Bearer meta-test-key");
+    const payload = JSON.parse(String(init.body)) as { model: string };
+    assert.equal(payload.model, "muse-spark-open");
+    assert.doesNotMatch(JSON.stringify(init), /BASE TEN|muse-test-key/);
+    return response('{"type":"GET_ETA"}');
+  });
+  try {
+    const result = await intentPost(new NextRequest("https://app.test/api/ai/intent", { method: "POST", headers: { "content-type": "application/json", origin: "https://app.test" }, body: JSON.stringify(requestBody) }));
+    assert.equal(result.status, 200);
+    assert.deepEqual(await result.json(), { intent: { type: "GET_ETA" }, provider: "meta" });
+  } finally {
+    if (previousKey === undefined) delete process.env.META_API_KEY;
+    else process.env.META_API_KEY = previousKey;
+    if (previousEnabled === undefined) delete process.env.META_ENABLED;
+    else process.env.META_ENABLED = previousEnabled;
+    if (previousModel === undefined) delete process.env.META_MODEL;
+    else process.env.META_MODEL = previousModel;
+  }
+});
+
 test("Gemini is selected when enabled and Muse remains untouched", async (context) => {
   const previousGeminiKey = process.env.GEMINI_API_KEY;
   const previousGeminiEnabled = process.env.GEMINI_ENABLED;
