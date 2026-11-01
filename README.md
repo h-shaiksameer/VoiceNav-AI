@@ -82,9 +82,9 @@ If Overpass returns HTTP 502, the Places panel explicitly says **Places temporar
 
 ### Application Shell
 
-- The header contains the VoiceNav brand, development status, OpenStreetMap attribution, map-session menu, and the **Map voice: Disabled/Enabled** toggle.
+- The header contains a left-aligned menu for the left sidebar, the VoiceNav brand, development status, OpenStreetMap attribution, and the **Map voice: Disabled/Enabled** toggle.
 - The workspace tab row switches between **Main journey** and independent map sessions.
-- The left sidebar contains the route planner, place search, service status, and session-specific summary.
+- The left sidebar contains the route planner, sessions, place search, and service status. It is the only sidebar on desktop and mobile.
 - The map stage contains Leaflet controls, route/marker layers, status indicators, and the Nova assistant panel.
 - The assistant can be collapsed visually. Collapsing Nova stops normal Nova capture, but Map voice is controlled independently from the header.
 - The skip link, labels, roles, button titles, live regions, and keyboard-submit behavior provide the accessibility layer. Browser speech and geolocation permissions remain browser-controlled.

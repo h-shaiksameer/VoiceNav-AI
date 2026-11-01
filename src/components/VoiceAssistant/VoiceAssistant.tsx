@@ -35,6 +35,7 @@ export function VoiceAssistant({ engine, blocked, onBusyChange, active = true }:
   const [mapVoiceTranscript, setMapVoiceTranscript] = useState("");
   const [interruptionReady, setInterruptionReady] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileAssistantHidden, setMobileAssistantHidden] = useState(true);
   const uiControlHost = active && typeof document !== "undefined" ? document.getElementById("ui-control-slot") : null;
   const abortListening = useRef<(() => void) | null>(null);
   const stopSpeaking = useRef<(() => void) | null>(null);
@@ -391,6 +392,22 @@ export function VoiceAssistant({ engine, blocked, onBusyChange, active = true }:
     listen(true);
   }
 
+  function hideMobileAssistant() {
+    if (uiControlMode.current) {
+      uiControlMode.current = false;
+      setUiControlActive(false);
+      engine.clearUiControl();
+    }
+    stopVoice();
+    setCollapsed(true);
+    setMobileAssistantHidden(true);
+  }
+
+  function showMobileAssistant() {
+    setMobileAssistantHidden(false);
+    setCollapsed(false);
+  }
+
   function listen(followup = false) {
     if (!followup && state === "listening") { stopVoice(); return; }
     if ((blocked && !followup) || (state === "processing" && !followup) || !panelOpen.current || document.hidden) return;
@@ -516,8 +533,9 @@ export function VoiceAssistant({ engine, blocked, onBusyChange, active = true }:
 
   return <>
     {uiControlHost ? createPortal(uiControlButton, uiControlHost) : uiControlButton}
-    <section className={`assistant-panel ${collapsed ? "assistant-collapsed" : ""}`} aria-labelledby="assistant-title">
-    <header className="assistant-header"><span className={`assistant-symbol ${state === "listening" ? "listening" : ""}`}><AudioLines size={21} /></span><div><h2 id="assistant-title">VoiceNav assistant</h2><span className={`assistant-status state-${status}`}><i />{statusLabel}</span></div><button className="icon-button" onClick={() => { if (collapsed) { if (uiControlMode.current) { uiControlMode.current = false; setUiControlActive(false); engine.clearUiControl(); stopVoice(); } } else { voiceConversation.current = false; setContinuousListening(false); if (!uiControlMode.current && (state === "listening" || state === "responding")) stopVoice(); } setCollapsed(!collapsed); }} aria-expanded={!collapsed} aria-label={collapsed ? "Expand assistant" : "Collapse assistant"} title={collapsed ? "Expand assistant" : "Collapse assistant"}>{collapsed ? <ChevronUp size={18} /> : <ChevronDown size={18} />}</button></header>
+    {(mobileAssistantHidden || collapsed) && <button className="assistant-mobile-launch" type="button" onClick={showMobileAssistant} aria-label="Open VoiceNav assistant" title="Open VoiceNav assistant"><Mic size={20} /></button>}
+    <section className={`assistant-panel ${collapsed ? "assistant-collapsed" : ""} ${mobileAssistantHidden ? "assistant-mobile-hidden" : ""}`} aria-labelledby="assistant-title">
+    <header className="assistant-header"><span className={`assistant-symbol ${state === "listening" ? "listening" : ""}`}><AudioLines size={21} /></span><div><h2 id="assistant-title">VoiceNav assistant</h2><span className={`assistant-status state-${status}`}><i />{statusLabel}</span></div><button className="icon-button assistant-mobile-hide" type="button" onClick={hideMobileAssistant} aria-label="Hide assistant" title="Hide assistant"><X size={18} /></button><button className="icon-button" onClick={() => { if (collapsed) { if (uiControlMode.current) { uiControlMode.current = false; setUiControlActive(false); engine.clearUiControl(); stopVoice(); } } else { voiceConversation.current = false; setContinuousListening(false); if (!uiControlMode.current && (state === "listening" || state === "responding")) stopVoice(); } setCollapsed(!collapsed); }} aria-expanded={!collapsed} aria-label={collapsed ? "Expand assistant" : "Collapse assistant"} title={collapsed ? "Expand assistant" : "Collapse assistant"}>{collapsed ? <ChevronUp size={18} /> : <ChevronDown size={18} />}</button></header>
     {!collapsed && <>
       <div className="conversation" ref={messages} role="log" aria-label="Conversation" aria-live="polite" aria-relevant="additions">
         {context.messages.length === 0 ? <div className="conversation-empty"><AudioLines size={29} /><span>Your journey, in conversation.</span></div> : context.messages.map((message) => <div key={message.id} className={`message message-${message.role}`}><span className="message-role">{message.role === "assistant" ? "VoiceNav · Local" : "You"}{message.role === "assistant" && <button className="icon-button" type="button" title="Read this reply aloud" aria-label="Read this reply aloud" onClick={() => playReply(message.text, message.spokenText)} disabled={blocked || state === "processing"}><Volume2 size={13} /></button>}</span><p>{message.text}</p></div>)}

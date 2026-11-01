@@ -234,14 +234,18 @@ test("map voice owns a separate microphone turn and does not send navigation tex
   assert.ok(view.getByRole("button", { name: /Map voice enabled/i }));
 });
 
-test("map sessions open from the hamburger and support create, switch and delete", (context) => {
+test("the hamburger opens one left sidebar with sessions and supports create, switch and delete", (context) => {
   browser(context);
   const view = render(createElement(Dashboard));
-  fireEvent.click(view.getByRole("button", { name: "Open map sessions" }));
-  assert.ok(view.getByRole("complementary", { name: "Map sessions" }));
-  fireEvent.click(view.getByRole("button", { name: "+ New session" }));
-  fireEvent.click(view.getByRole("button", { name: "+ New session" }));
-  const sessionList = view.getByRole("complementary", { name: "Map sessions" }).querySelector(".session-list")!;
+  const hamburger = view.getByRole("button", { name: "Open journey planner and sessions" });
+  assert.equal(view.container.querySelector(".app-header")?.firstElementChild, hamburger);
+  fireEvent.click(hamburger);
+  const sidebar = view.getByRole("complementary", { name: "Journey planner and places" });
+  const sessions = view.getByRole("region", { name: "Map sessions" });
+  assert.ok(sidebar.contains(sessions));
+  fireEvent.click(sessions.querySelector(".sidebar-session-new")!);
+  fireEvent.click(sessions.querySelector(".sidebar-session-new")!);
+  const sessionList = sessions.querySelector(".session-list")!;
   assert.equal(sessionList.querySelectorAll("li").length, 3);
   fireEvent.click(sessionList.querySelector("li button")!);
   assert.equal(sessionList.querySelector("[aria-label='Delete Session 1']")?.getAttribute("aria-label"), "Delete Session 1");

@@ -27,9 +27,9 @@ function readDraft(workspaceId: string): OptimizerDraft {
 
 const emptySession: NavigationSession = { revision: 0, status: "idle", origin: null, destination: null, route: null };
 
-type ExtendedProps = Props & { workspaceId: string; onDraftChange: (hasData: boolean) => void };
+type ExtendedProps = Props & { workspaceId: string; onDraftChange: (hasData: boolean) => void; onOptimized?: (result: OptimizerState) => void };
 
-export function MultiStopOptimizer({ onClose, workspaceId, onDraftChange }: ExtendedProps) {
+export function MultiStopOptimizer({ onClose, workspaceId, onDraftChange, onOptimized }: ExtendedProps) {
   const [locations, setLocations] = useState<(Location | null)[]>([null]);
   const [optimizer, setOptimizer] = useState<OptimizerState>(null);
   const [busy, setBusy] = useState(false);
@@ -54,6 +54,7 @@ export function MultiStopOptimizer({ onClose, workspaceId, onDraftChange }: Exte
     setOptimizer(null);
     window.localStorage.removeItem(optimizerStorageKey(workspaceId));
     onDraftChange(false);
+    onOptimized?.(null);
     setError("");
   }
 
@@ -66,6 +67,7 @@ export function MultiStopOptimizer({ onClose, workspaceId, onDraftChange }: Exte
     setLocations(nextLocations);
     setOptimizer(null);
     saveDraft(nextLocations, null);
+    onOptimized?.(null);
     setError("");
   }
 
@@ -82,6 +84,7 @@ export function MultiStopOptimizer({ onClose, workspaceId, onDraftChange }: Exte
     setLocations(nextLocations);
     setOptimizer(null);
     saveDraft(nextLocations, null);
+    onOptimized?.(null);
   }
 
   async function optimize() {
@@ -99,9 +102,11 @@ export function MultiStopOptimizer({ onClose, workspaceId, onDraftChange }: Exte
       const nextOptimizer = { ordered, route, result };
       setOptimizer(nextOptimizer);
       saveDraft(locations, nextOptimizer);
+      onOptimized?.(nextOptimizer);
     } catch (reason) {
       setOptimizer(null);
       saveDraft(locations, null);
+      onOptimized?.(null);
       setError(reason instanceof Error ? reason.message : "Unable to optimize this trip. Choose fewer or more accessible locations and retry.");
     } finally { setBusy(false); }
   }
