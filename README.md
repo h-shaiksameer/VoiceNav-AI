@@ -71,7 +71,7 @@ VoiceNav supports provider credentials through server-side adapters rather than 
 | Credential type | Provider path | Model configuration | Status |
 | --- | --- | --- | --- |
 | First-party Meta API key | Meta Model API | `META_MODEL`, defaulting to `muse-spark-open` | Supported |
-| Baseten API key | Baseten OpenAI-compatible Model API | `BASETEN_MODEL`, defaulting to `meta-models/muse-spark-open` | Supported |
+| Baseten API key | Baseten OpenAI-compatible Model API | `BASETEN_MODEL`, defaulting to `meta-models/muse-spark-open-1026` | Supported |
 | Gemini API key | Google Gemini API | `GEMINI_MODEL` | Supported |
 
 This means the repository is ready for a future Meta API key without a code rewrite. Enable the Meta provider, provide the credential through the server environment, restart the application, and the same intent schema, local safety checks, route execution, speech workflow, and fallback behavior remain in place. The key is never included in client requests or model prompts.

@@ -69,7 +69,7 @@ test("server route invokes the OpenAI-compatible Baseten endpoint without exposi
   context.mock.method(globalThis, "fetch", async (url: string | URL, init: RequestInit) => {
     assert.match(String(url), /inference\.baseten\.co\/v1\/chat\/completions/);
     const payload = JSON.parse(String(init.body)) as { model: string; max_tokens: number; messages: Array<{ role: string; content: string }> };
-    assert.equal(payload.model, "meta-models/muse-spark-open");
+    assert.equal(payload.model, "meta-models/muse-spark-open-1026");
     assert.equal(payload.max_tokens, 180);
     assert.doesNotMatch(JSON.stringify(payload), /test-only-key/);
     return response('{"type":"GET_ETA"}');

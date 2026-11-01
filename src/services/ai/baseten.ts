@@ -15,7 +15,7 @@ export const basetenIntentRequestSchema = z.object({
 
 export type AIIntentRequest = z.infer<typeof basetenIntentRequestSchema>;
 const geminiModel = process.env.GEMINI_MODEL?.trim() || "gemini-3.5-flash-lite";
-const museModel = process.env.BASETEN_MODEL?.trim() || "meta-models/muse-spark-open";
+const museModel = process.env.BASETEN_MODEL?.trim() || "meta-models/muse-spark-open-1026";
 const metaModel = process.env.META_MODEL?.trim() || "muse-spark-open";
 const metaApiBaseUrl = (process.env.META_API_BASE_URL?.trim() || "https://api.llama.com/v1").replace(/\/$/, "");
 const modelRequestTimeoutMs = 15000;
