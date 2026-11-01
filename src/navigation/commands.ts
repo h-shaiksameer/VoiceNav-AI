@@ -58,12 +58,21 @@ export function destinationInstruction(text: string): string | null {
   const labelled = new RegExp(`^${prefix}(?:(?:set|select|choose|use) )?(?:my |the )?(?:target(?: location)?|destination(?: location)?)(?:\\s*[:=]\\s*|\\s+(?:(?:as|to|is)\\s+)?)(.+?)[.]*$`, "i");
   const desire = /^(?:i want to|i need to|i(?:'d| would) like to|let's) (?:go|drive|head|navigate) to (.+?)[.!?]*$/i;
   const there = new RegExp(`^${prefix}(?:take me|navigate|go|drive|head) (there|here)[.!?]*$`, "i");
+  const questionAndGo = new RegExp(`^${prefix}(?:where|what) is (.+?)\\s*,?\\s*(?:take me|navigate(?: me)?|go|drive(?: me)?|head) there[.!?]*$`, "i");
   const labelMatch = clean.match(labelled);
+  const match = clean.match(direct) ?? clean.match(set) ?? clean.match(desire) ?? clean.match(questionAndGo) ?? clean.match(there) ?? labelMatch;
   if (labelMatch && /^(?:as|to|is|location)$/i.test(labelMatch[1])) return null;
-  const match = clean.match(direct) ?? clean.match(set) ?? clean.match(desire) ?? clean.match(there) ?? labelMatch;
-  const target = match ? match[1].replace(/[, ]+(?:please|thanks|thank you)$/i, "").trim() : destinationName(clean);
+  const target = match ? match[1].replace(/^(?:the )?(?:destination|target)(?: location)?\s+/i, "").replace(/[, ]+(?:please|thanks|thank you)$/i, "").trim() : destinationName(clean);
   if (!target || /[?!;]/.test(target) || /\b(?:then|also|instead|after that)\b/i.test(target)) return null;
   return target;
+}
+
+export function locationQuestionInstruction(text: string): string | null {
+  const clean = normalizeLanguage(text).replace(/[.!?]+$/u, "").trim();
+  const match = clean.match(/^(?:please\s+)?(?:where(?:'s| is)|what is the location of|show me where)\s+(.+)$/i);
+  if (!match || /\b(?:take me|navigate|go|drive|head)\b/i.test(match[1])) return null;
+  const query = match[1].trim();
+  return /^(?:it|this|that|there|here)$/i.test(query) ? query : destinationName(query);
 }
 
 export function stopInstruction(text: string): boolean {
@@ -139,7 +148,20 @@ export function contextualReference(text: string, context: ConversationContext):
 
 export function distanceBetweenInstruction(text: string): { originQuery: string; query: string } | null {
   const clean = normalizeLanguage(text).replace(/[.!?]+$/, "").trim();
-  const match = clean.match(/^(?:(?:please|kindly) )?(?:(?:what is|what's|calculate|check|find|tell me|give me) )?(?:the )?(?:driving )?(?:distance|how far) between (.+?) and (.+)$/i);
+  const between = clean.match(/^(?:(?:please|kindly) )?(?:(?:what is|what's|calculate|check|find|tell me|give me) )?(?:the )?(?:driving )?(?:distance|how far) between (.+?) and (.+)$/i);
+  const from = clean.match(/^(?:(?:please|kindly) )?how far is (?:it|that|this|there|here|([^?]+?)) from (.+)$/i);
+  if (!between && !from) return null;
+  const originQuery = (from ? from[2] : between![1]).trim();
+  const query = (from ? from[1] : between![2]).trim();
+  if (/[?!;]/.test(`${originQuery} ${query}`)) return null;
+  if (/^(?:it|that|this|there|here)$/i.test(query)) return null;
+  return originQuery && query ? { originQuery, query } : null;
+}
+
+export function travelTimeBetweenInstruction(text: string): { originQuery: string; query: string } | null {
+  const clean = normalizeLanguage(text).replace(/[.!?]+$/, "").trim();
+  const match = clean.match(/^(?:(?:please|kindly) )?(?:how much time (?:will it take me|it will take me|does it take)|how long (?:does it take|will it take|it will take))(?: me)? to (?:go|drive|travel|reach) from (.+?) to (.+)$/i)
+    ?? clean.match(/^(?:(?:please|kindly) )?how long (?:will it take|does it take|it will take) to go from (.+?) to (.+)$/i);
   if (!match || /[?!;]/.test(`${match[1]} ${match[2]}`)) return null;
   const originQuery = match[1].trim();
   const query = match[2].trim();

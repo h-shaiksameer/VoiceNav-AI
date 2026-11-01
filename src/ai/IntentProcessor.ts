@@ -23,7 +23,7 @@ export class IntentProcessor {
     }
     if (ambiguousReference(input.text)) return { type: "CLARIFY", clarification: "You mentioned multiple results. Choose one result number." };
     if (intent.type === "CHANGE_DESTINATION") {
-      const instruction = destinationInstruction(input.text);
+      const instruction = destinationInstruction(input.text) ?? (intent.query ? destinationInstruction(intent.query) : null);
       if (!instruction) return { type: "CLARIFY" };
       const matches = matchingCategories(input.text);
       if (matches.length > 1) return { type: "CLARIFY", clarification: "Choose a single place type or destination." };

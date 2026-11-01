@@ -9,9 +9,9 @@ import "leaflet/dist/leaflet.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: `${process.env.NEXT_PUBLIC_APP_NAME || "VoiceNav AI"} | Your Journey, In Conversation`,
+  title: `${process.env.APP_NAME || "VoiceNav AI"} | Your Journey, In Conversation`,
   description: "A voice-first route planner built on OpenStreetMap. Real routes and places, with explicit destination control.",
-  applicationName: process.env.NEXT_PUBLIC_APP_NAME || "VoiceNav AI",
+  applicationName: process.env.APP_NAME || "VoiceNav AI",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

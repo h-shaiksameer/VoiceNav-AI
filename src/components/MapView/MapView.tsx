@@ -93,7 +93,7 @@ export default function MapView(props: Props) {
   const [failedTiles, setFailedTiles] = useState(false);
   const errors = useRef(0);
   const successes = useRef(0);
-  const tileUrl = process.env.NEXT_PUBLIC_MAP_TILE_URL || "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+  const tileUrl = process.env.MAP_TILE_URL || "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
   return <div className="map-canvas" aria-label="Interactive navigation map">
     <MapContainer center={[20, 0]} zoom={3} minZoom={2} maxZoom={19} zoomControl={false} scrollWheelZoom attributionControl>
       <TileLayer url={tileUrl} attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' eventHandlers={{

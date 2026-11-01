@@ -9,6 +9,7 @@ import { locationSchema } from "@/types/schemas";
 import { detectLanguage, hindiConfirmation, type AssistantLanguage } from "@/ai/language";
 import { addMessage, clearPendingNavigation, emptyContext } from "./ConversationContext";
 import { defaultConversationServices, type ConversationServices } from "./ConversationServices";
+import { clearsPendingNavigation as intentClearsPendingNavigation } from "./intentPolicy";
 import { parseUiControlCommand } from "@/navigation/uiControl";
 
 export type PlaceSearch = { category: PlaceCategory; scope: "nearby" | "route"; places: PlaceResult[] };
@@ -27,13 +28,15 @@ export class ConversationEngine {
   private context = emptyContext();
   private listeners = new Set<() => void>();
   private busy = false;
-  private readonly processor = new IntentProcessor();
+  private readonly processor: IntentProcessor;
 
   constructor(
     private readonly navigation: NavigationController,
     private readonly callbacks: Callbacks,
     private readonly services: ConversationServices = defaultConversationServices,
+    processor = new IntentProcessor(),
   ) {
+    this.processor = processor;
     navigation.subscribe(() => this.resetNavigationContext());
   }
 
@@ -297,7 +300,7 @@ export class ConversationEngine {
       if (this.context.pendingLocationChoices.length) return this.reply(this.say("That was not one of the listed options. Say option one, option two, or another listed option number.", "यह सूची में दिया गया विकल्प नहीं है। विकल्प एक, विकल्प दो, या सूची का कोई दूसरा नंबर बोलिए।"));
       const session = this.navigation.getSnapshot();
       const intent = await this.processor.process({ text: clean, context: this.context, session });
-      if (["PLAN_ROUTE", "CHANGE_DESTINATION", "STOP_NAVIGATION", "SEARCH_NEARBY", "SEARCH_ALONG_ROUTE"].includes(intent.type)) this.clearPending();
+      if (intentClearsPendingNavigation(intent)) this.clearPending();
       let response: string;
       switch (intent.type) {
         case "PLAN_ROUTE":
@@ -313,6 +316,13 @@ export class ConversationEngine {
         case "GET_DISTANCE_BETWEEN":
           if (!intent.originQuery || !intent.query) throw new Error("Give both locations to measure their distance.");
           response = await this.distanceBetweenLocations(intent.originQuery, intent.query, session.revision);
+          break;
+        case "GET_TRAVEL_TIME_BETWEEN":
+          if (!intent.originQuery || !intent.query) throw new Error("Give both locations to estimate travel time.");
+          response = await this.travelTimeBetweenLocations(intent.originQuery, intent.query, session.revision);
+          break;
+        case "LOOKUP_LOCATION":
+          response = await this.lookupLocation(intent.query, intent.reference);
           break;
         case "GET_TRAFFIC":
           response = this.say("Live traffic is not available. OSRM estimates do not account for current congestion or road closures.", "लाइव ट्रैफिक की जानकारी उपलब्ध नहीं है। समय के अनुमान में मौजूदा जाम या बंद सड़कें शामिल नहीं हैं।");
@@ -400,5 +410,27 @@ export class ConversationEngine {
     const originName = this.shortLocationName(origin);
     const destinationName = this.shortLocationName(destination);
     return this.say(`The driving distance between ${originName} and ${destinationName} is ${formatDistance(route.distanceMeters)}.`, `${originName} और ${destinationName} के बीच ड्राइविंग दूरी ${this.distance(route.distanceMeters)} है।`);
+  }
+
+  private async travelTimeBetweenLocations(originQuery: string, destinationQuery: string, revision: number): Promise<string> {
+    const session = this.navigation.getSnapshot();
+    const reference = session.origin ?? this.callbacks.getReferenceLocation() ?? undefined;
+    const origins = await this.services.searchLocations(originQuery, reference);
+    if (!origins.length) return this.say(`I could not find ${originQuery}. Your route and destination are unchanged.`, `${originQuery} नहीं मिला। आपका रास्ता और मंज़िल वही हैं।`);
+    const origin = origins[0];
+    const destinations = await this.services.searchLocations(destinationQuery, origin);
+    if (!destinations.length) return this.say(`I could not find ${destinationQuery}. Your route and destination are unchanged.`, `${destinationQuery} नहीं मिला। आपका रास्ता और मंज़िल वही हैं।`);
+    const destination = destinations[0];
+    const route = await this.services.requestRoute([origin, destination]);
+    if (this.navigation.getSnapshot().revision !== revision) throw new Error("Your journey changed while checking that travel time. Please ask again.");
+    return this.say(`The estimated driving time from ${this.shortLocationName(origin)} to ${this.shortLocationName(destination)} is ${formatDuration(route.durationSeconds)}. This is a static estimate without live traffic.`, `${this.shortLocationName(origin)} से ${this.shortLocationName(destination)} तक अनुमानित ड्राइविंग समय ${this.duration(route.durationSeconds)} है। यह लाइव ट्रैफिक के बिना स्थिर अनुमान है।`);
+  }
+
+  private async lookupLocation(query: string | undefined, reference?: number): Promise<string> {
+    const place = reference === undefined ? undefined : this.context.recentPlaces[reference];
+    const locations = place ? [place] : query ? await this.services.searchLocations(query, this.navigation.getSnapshot().origin ?? this.callbacks.getReferenceLocation() ?? undefined) : [];
+    if (!locations.length) return this.say("I could not find that place. Give a more specific name or address.", "वह जगह नहीं मिली। थोड़ा अधिक स्पष्ट नाम या पता बताइए।");
+    const names = locations.slice(0, 3).map((location) => `${location.name} (${location.lat.toFixed(5)}, ${location.lon.toFixed(5)})`);
+    return this.say(`I found ${names.join("; ")}. This lookup did not change your route.`, `${names.join("; ")} मिला। इस खोज से आपका रास्ता नहीं बदला है।`);
   }
 }

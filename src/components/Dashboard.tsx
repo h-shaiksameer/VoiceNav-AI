@@ -101,7 +101,6 @@ export function Dashboard() {
 
   const mobileResult = isMobile && !optimizerOpen ? mobileOptimizerResults[optimizerWorkspaceId] : null;
   const mainMapSession = mobileResult ? { ...app.session, revision: mobileResult.result.order.length, status: "ready" as const, route: mobileResult.route } : app.session;
-
   return <div className="app-shell">
     <a className="skip-link" href="#journey">Skip to route planner</a>
     <header className="app-header">

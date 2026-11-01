@@ -269,6 +269,17 @@ test("distance between two named places is distinct from current route distance"
   assert.equal(navigation.getSnapshot().route, null);
 });
 
+test("natural-language location and travel questions produce useful read-only answers", async () => {
+  const engine = engineFor(await activeNavigation(), {
+    searchLocations: async (query) => [{ id: `test:${query}`, name: query, lat: 17.36, lon: 78.47 }],
+    requestRoute: async () => ({ ...route, durationSeconds: 900 }),
+  });
+  assert.match(await engine.send("Where is Charminar?"), /Charminar.*17\.36000/);
+  assert.match(await engine.send("How far is Charminar from Hyderabad?"), /driving distance/);
+  assert.match(await engine.send("How much time will it take me to go from Hyderabad to Charminar?"), /estimated driving time/);
+  assert.equal(engine.getSnapshot().pendingDestination, null);
+});
+
 test("distance lookup reports missing endpoints and rejects a changed journey", async () => {
   const missingOrigin = engineFor(new NavigationController(async () => structuredClone(route)), { searchLocations: async () => [] });
   assert.match(await missingOrigin.send("Distance between Charminar and Farooq Nagar"), /could not find Charminar/);

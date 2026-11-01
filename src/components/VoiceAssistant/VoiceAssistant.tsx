@@ -99,16 +99,17 @@ export function VoiceAssistant({ engine, blocked, onBusyChange, active = true }:
       setAllowInterruptions(false);
       const active = replyActive.current || Boolean(abortListening.current) || Boolean(stopSpeaking.current);
       voiceConversation.current = false;
-      replyActive.current = false;
-      pendingPlayback.current = null;
       setInterruptionReady(false);
       stopInterruption.current?.(); stopInterruption.current = null;
-      if (!active) return;
       abortListening.current?.(); abortListening.current = null;
-      if (stopSpeaking.current) playbackStoppedAt.current = Date.now();
-      stopSpeaking.current?.(); stopSpeaking.current = null;
-      setState((current) => current === "listening" || current === "responding" ? "idle" : current);
-      onBusyChange(false);
+      if (replyActive.current || stopSpeaking.current) {
+        setState("responding");
+        onBusyChange(true);
+      } else if (active) {
+        pendingPlayback.current = null;
+        setState((current) => current === "listening" || current === "responding" ? "idle" : current);
+        onBusyChange(false);
+      }
     }
     document.addEventListener("visibilitychange", stopHiddenRecording);
     return () => document.removeEventListener("visibilitychange", stopHiddenRecording);
@@ -254,7 +255,7 @@ export function VoiceAssistant({ engine, blocked, onBusyChange, active = true }:
     }
     abortListening.current?.(); abortListening.current = null;
     stopSpeaking.current?.(); stopSpeaking.current = null;
-    if (!panelOpen.current || document.hidden) { voiceConversation.current = false; finishReply(); return; }
+    if (!panelOpen.current) { voiceConversation.current = false; finishReply(); return; }
     setError(""); setState("responding"); onBusyChange(true);
     replyActive.current = true;
     currentSpokenText.current = prepareSpokenText(engine.getSpokenText(spokenText));

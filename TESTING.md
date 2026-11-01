@@ -8,7 +8,7 @@ Use a current Node.js 22 LTS (or newer supported LTS) and npm. Install the locke
 npm ci
 ```
 
-Automated tests use local fixtures, mocked fetch responses, fake speech recognition/synthesis, fake timers and a jsdom DOM. They do not call Nominatim, OSRM, Overpass, a speech provider or a model, and do not require microphone permission or API keys. Public-service uptime is deliberately not a test dependency.
+Automated tests use local fixtures, mocked fetch responses, fake speech recognition/synthesis, fake timers and a jsdom DOM. They do not call Nominatim, OSRM, Overpass, a speech provider, Baseten, or a model, and do not require microphone permission, Baseten credits, or API keys. Public-service and model-provider uptime is deliberately not a test dependency.
 
 ## Commands
 
@@ -61,6 +61,7 @@ c8 writes ignored reports under `coverage/`: `index.html` (HTML report), `lcov.i
 | Same safety suite: voice | Final Send/Submit vs interim/silence, Discard, noise cleanup, retained drafts, playback filtering, same-recognizer continuous turns, native restarts, zero-argument native input, processed-track startup/fallback, six-second no-result heuristic, raw echo events, AEC upgrade failures, late cancellation, permissions and track cleanup |
 | [tests/services.test.ts](tests/services.test.ts) | Availability notifications, unknown/outage/recovery, 429/5xx/network/JSON/schema failures, non-outage 4xx input errors, client request contracts |
 | [tests/server/services.test.ts](tests/server/services.test.ts) | Same-origin/JSON/body-size/schema boundary, sanitized errors, cache TTL/capacity/in-flight deduplication, queue limits/recovery, throttling, upstream failures/timeouts, country lookup/filtering, OSRM coordinate order/alternatives, Overpass corridor limits/partial timeouts, all POST endpoints |
+| [tests/server/ai.test.ts](tests/server/ai.test.ts) | Mocked Gemini and Muse selection, missing keys, invalid model JSON/schema, timeout/rate-limit failures, bounded request context and local fallback status |
 | [tests/optimizer.test.ts](tests/optimizer.test.ts) | Exact multi-stop ordering, incomplete matrix rejection, and coordinate-only route payloads |
 | [tests/ui.test.ts](tests/ui.test.ts) | Stable runtime identity, latest selected-origin reference, route preservation on failure, stale-result cleanup, service-status states/recovery, unavailable Places controls/retry; normal voice and isolated Map voice header/transcript behavior; persistent Main journey/session drawer behavior |
 

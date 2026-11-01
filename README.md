@@ -15,11 +15,42 @@ Supported commands include:
 
 Map voice actions never set a navigation destination, change the origin, update GPS state, calculate a route, or modify the active journey. Zoom-at-location selects the nearest returned location without entering Nova’s destination flow. Each map session maintains its own viewport command state. Unsupported speech receives a map voice explanation instead of falling back to destination search.
 
-## No Model Accounts Or Keys Required
+## Optional AI Providers And Fallback
 
-The application uses a **local, deterministic English, Hindi and Hinglish intent algorithm** by default, including common Deccani Hindi wording. It runs in the browser, needs no AI provider, and does not send conversation text to a model. There is no Meta integration, no required model account, and no model credential configuration. The generic adapter interface remains replaceable, but no external model is configured or called. If a future optional adapter fails or returns invalid data, the intent processor falls back to the local algorithm.
+The local deterministic English, Hindi and Hinglish engine is always available and is the final fallback. Optional model classification is selected server-side by explicit `on`/`off` environment toggles. Copy `.env.example` to `.env.local`, then configure only the provider you intend to use:
 
-This is a working task-specific language processor, not a general-purpose language model. It understands supported navigation requests, common synonyms, polite commands, numbered results, and selected-place references. Unknown, contradictory, or ambiguous wording triggers clarification instead of guessing. It does not claim unrestricted natural-language understanding or fulfillment of any live-model hackathon requirement.
+```powershell
+GEMINI_ENABLED=on
+GEMINI_API_KEY=your-server-side-gemini-key
+# Optional; defaults to gemini-3.5-flash-lite
+GEMINI_MODEL=gemini-3.5-flash-lite
+
+# Keep this off during normal development; enable it only for the Muse presentation.
+BASETEN_ENABLED=off
+BASETEN_API_KEY=your-server-side-baseten-key
+```
+
+When both optional toggles are on and both keys exist, Gemini is selected first. Turn `GEMINI_ENABLED=off` and `BASETEN_ENABLED=on` to demonstrate Meta's **Muse Spark Open** model `meta-models/muse-spark-open` through `https://inference.baseten.co/v1`. Set both toggles to `off` for local-only operation. Never use a `NEXT_PUBLIC_` prefix, commit `.env.local`, paste a key into browser code, or include a key in logs. If a key has been exposed, revoke it and create a replacement before testing.
+
+Gemini and Muse are attempted only when Nova processes a user message. There are no startup, background, or automatic retry requests. The server sends the normalized user request, language, recent places, recent messages, and minimal session state. It applies an 8-second provider timeout and a small response limit, then validates the returned JSON with the existing intent schema. The models never receive coordinates or route geometry and never directly change navigation state.
+
+### Model-to-Intent Processing
+
+The model is an intent classifier, not the navigation controller. For each request, it returns one structured intent that the local application understands:
+
+1. The user message is normalized and sent to the server-only AI route.
+2. Gemini or Muse returns an intent such as `CHANGE_DESTINATION`, `SEARCH_NEARBY`, `GET_ETA`, or `CLARIFY`.
+3. `query` contains the actual place or address text after command words are removed. For example, `go to destination Charminar` becomes `query: "Charminar"`.
+4. The local `IntentProcessor` validates the intent and applies safety rules.
+5. The `ConversationEngine` performs geocoding, place searches, routing, confirmations, and navigation state changes.
+
+The model must not invent coordinates, places, route data, result IDs, or distances. Ambiguous, unsupported, or out-of-scope requests must produce `CLARIFY`, allowing the local engine to explain what the application supports. If a model request fails or returns an invalid intent, the original user message is processed by the deterministic local engine.
+
+Missing configuration, invalid credentials, timeouts, rate limits, billing/credit errors, malformed JSON, invalid model output, or any other selected-provider failure is logged to the browser console and Next.js server terminal, then the original message is transparently reprocessed locally. The header reports **Gemini Connected**, **Muse Connected**, **Checking AI Provider**, or **Local Engine Active**.
+
+To verify a provider manually, set one toggle and its rotated server-side key in `.env.local`, restart the development server, and submit a normal Nova text request such as `How long will it take?`. Confirm the header status and the unchanged route behavior. For the Muse presentation, set `GEMINI_ENABLED=off` and `BASETEN_ENABLED=on`; for local-only operation, set both to `off`. Force an upstream failure or remove the selected key and repeat the same request; the original message must complete through the local engine and the active route must remain protected.
+
+This is a working task-specific language processor, not a general-purpose language model. It understands supported navigation requests, common synonyms, polite commands, numbered results, and selected-place references. Unknown, contradictory, or ambiguous wording triggers clarification instead of guessing.
 
 **Map tiles, geocoding, routes, and places still need internet access.** Browser speech recognition may also need the browser vendor's network service. Text input remains available without a microphone.
 
@@ -37,6 +68,8 @@ Open http://localhost:3000 (or the alternate port printed by Next.js). No enviro
 ```powershell
 Copy-Item .env.example .env.local
 ```
+
+After changing `.env` or `.env.local`, stop and restart `npm run dev`; Next.js reads environment variables when the server starts. To diagnose a provider failure, submit a Nova text request and check the browser DevTools console and the terminal running Next.js for the HTTP status. Never paste the API key into the browser console.
 
 The environment file is ignored by Git. Never add secrets to browser-prefixed variables or source files. Installing dependencies generates the lockfile; retain it for repeatable installs.
 
@@ -73,6 +106,7 @@ See [TESTING.md](TESTING.md) for running individual suites, enforced coverage ga
 | Hindi speech recognition and Hindi speech playback | **Not supported as a reliable feature**; the language option and partial `hi-IN` implementation remain experimental and may fail or produce incorrect results |
 | Text, normal Nova voice, silent continuous Map voice and live map transcript | Implemented; recognition depends on the browser/device and Map voice is isolated from Nova |
 | Destination safety and confirmation | Runtime schemas, original-source intent, allowed result IDs, revisions and atomic route commits |
+| Optional Gemini and Meta Muse Spark Open intent classification | Implemented through server-only adapters with deterministic local fallback |
 
 The sidebar's **Service status** shows Address search, Driving routes and Places as **Not checked yet**, **Last request succeeded**, or **Temporarily unavailable**. This reflects actual request outcomes, not proactive health monitoring or guaranteed uptime. Network failures, invalid provider responses, HTTP 429 and server errors update availability for both voice and button requests. Input/policy errors such as a too-long corridor search do not declare a provider outage.
 
@@ -140,6 +174,7 @@ If Overpass returns HTTP 502, the Places panel explicitly says **Places temporar
 
 - Nova handles navigation requests, destination resolution, route questions, ETA, distance, traffic availability, alternatives, nearby/along-route search, place details, comparison, confirmation, cancellation, and route stopping.
 - Normal Nova uses a local deterministic intent processor. It is not a general-purpose model and does not send conversation text to an AI account.
+- When an optional provider is enabled, Nova asks Gemini or Muse for a structured intent through the server adapter. The local processor remains authoritative for safety validation and executes the original request when the selected provider fails.
 - Text submissions can use the Send button or Enter. Voice submissions require a finalized `Send`/`Submit` phrase unless the user submits the draft manually.
 - Interim speech, silence, discarded drafts, empty control phrases, unsupported requests, and ambiguous intent do not commit a route.
 - Normal Nova and Map voice are mutually exclusive. Enabling Map voice collapses/stops Nova; opening Nova disables Map voice and clears map-only choices.
@@ -158,7 +193,7 @@ If Overpass returns HTTP 502, the Places panel explicitly says **Places temporar
 
 - Each map session owns its origin, destination, route, search results, pending navigation state, map viewport commands, and assistant runtime.
 - Multi-stop optimizer stops and the latest result are saved per workspace in the browser. Loading the optimizer, switching sessions, or returning to the main journey does not discard them.
-- The right-hand **Map sessions** menu shows the main journey and independent sessions, with a **Clear trip stops** action for each saved workspace. Deleting a session also deletes its optimizer data; other workspaces remain unchanged.
+- The unified left sidebar shows the main journey and independent sessions, with a **Clear trip stops** action for each saved workspace. Deleting a session also deletes its optimizer data; other workspaces remain unchanged.
 - Session changes cannot overwrite another session’s route or map command.
 - The microphone owner is shared across workspaces, so only one active voice flow can listen at a time.
 - Deleting or switching sessions does not silently copy route or destination state into another session.
@@ -341,6 +376,7 @@ These are free community services, not unrestricted production infrastructure. C
 - Opening hours are raw OpenStreetMap data, not verified live. Ratings are unavailable. Missing details show **Not available**.
 - OSRM may snap locations to its road network. Alternative routes are read-only previews and are not guaranteed to be returned. No walking, transit, alternative-route switching, saved addresses, or account system is included.
 - Local understanding reliably targets English navigation vocabulary. Typed Hindi/Hinglish and common Deccani phrases are present experimentally, but Hindi speech is unsupported/unverified and bugs are expected. The processor does not cover arbitrary languages, general knowledge, or every possible phrasing. Clarification is a safety feature, not a model response.
+- Gemini and Muse are optional intent classifiers, not route, geocoding, places, traffic, or business-information providers. Their output is never treated as factual data; actual searches, route calculations, comparisons and destination commits remain in the existing services and safety pipeline.
 - Automated validation uses deterministic mocked external services and browser audio. Live provider uptime, browser microphone permissions, recognition accuracy and speaker feedback still require device verification. See [TESTING.md](TESTING.md).
 
 ## Manual Acceptance Checks

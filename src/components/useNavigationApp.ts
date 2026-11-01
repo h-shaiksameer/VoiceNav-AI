@@ -63,6 +63,8 @@ export function useNavigationApp() {
     onStatus: (status) => setTrackingStatus(status),
   }));
   const session = useSyncExternalStore(runtime.navigation.subscribe, runtime.navigation.getSnapshot, runtime.navigation.getSnapshot);
+  const aiProviderStatus = useSyncExternalStore(runtime.aiProvider.subscribeStatus, runtime.aiProvider.getStatus, runtime.aiProvider.getStatus);
+  const aiProviderProvider = useSyncExternalStore(runtime.aiProvider.subscribeStatus, runtime.aiProvider.getProvider, runtime.aiProvider.getProvider);
   const working = busy || assistantBusy || locating;
 
   useEffect(() => {
@@ -154,7 +156,7 @@ export function useNavigationApp() {
 
   return {
     origin, destination, session, userLocation, trackedLocation: ["active", "paused"].includes(session.status) ? trackedLocation : null, trackingStatus, movement, progress: ["active", "paused"].includes(session.status) ? progress : null, offRoute: ["active", "paused"].includes(session.status) && offRouteReadings >= 2, search, selected, detours, alternatives, category, scope, parallelAssistantSnapshot, parallelAssistant,
-    working, busy, assistantBusy, locating, routeError, placeError, runtime, mapCommand,
+    working, busy, assistantBusy, locating, routeError, placeError, runtime, mapCommand, aiProviderStatus, aiProviderProvider,
     setOrigin, setDestination, setSelected: selectPlace, setCategory, setScope, setAssistantBusy,
     locate, calculateRoute, startJourney, pauseJourney, resumeJourney, endJourney, recalculateJourney, findPlaces, externalMessage, stopRoute, navigateTo, askParallelAssistant,
   };

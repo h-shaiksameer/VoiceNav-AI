@@ -2,7 +2,7 @@ import type { AIProvider, IntentInput } from "../AIProvider";
 import type { Intent } from "@/types/domain";
 import { matchingCategories } from "@/utils/categories";
 import { detectLanguage, hindiNegation, normalizeHindi } from "../language";
-import { ambiguousReference, contextualReference, destinationInstruction, distanceBetweenInstruction, normalizeLanguage, routeInstruction, stopInstruction } from "@/navigation/commands";
+import { ambiguousReference, contextualReference, destinationInstruction, distanceBetweenInstruction, locationQuestionInstruction, normalizeLanguage, routeInstruction, stopInstruction, travelTimeBetweenInstruction } from "@/navigation/commands";
 import { parseUiControlCommand } from "@/navigation/uiControl";
 
 export class LocalIntentProvider implements AIProvider {
@@ -10,12 +10,18 @@ export class LocalIntentProvider implements AIProvider {
   readonly mode = "local" as const;
 
   async process({ text, context }: IntentInput): Promise<Intent> {
+    console.info("[VoiceNav AI] intent source: local-engine");
+    console.trace("[VoiceNav AI] local-engine call stack");
     const clean = normalizeLanguage(text);
     if (parseUiControlCommand(clean)) return { type: "CLARIFY", clarification: "Map controls are available only in Map voice mode." };
     const plan = routeInstruction(clean);
     if (plan) return { type: "PLAN_ROUTE", ...plan };
+    const travelTimeBetween = travelTimeBetweenInstruction(clean);
+    if (travelTimeBetween) return { type: "GET_TRAVEL_TIME_BETWEEN", ...travelTimeBetween };
     const distanceBetween = distanceBetweenInstruction(clean);
     if (distanceBetween) return { type: "GET_DISTANCE_BETWEEN", ...distanceBetween };
+    const locationQuestion = locationQuestionInstruction(clean);
+    if (locationQuestion) return { type: "LOOKUP_LOCATION", query: locationQuestion, reference: contextualReference(clean, context) };
     const query = destinationInstruction(clean);
     const matches = matchingCategories(clean);
     const category = matches.length === 1 ? matches[0].value : undefined;
