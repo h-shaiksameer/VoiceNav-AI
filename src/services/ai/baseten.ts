@@ -16,7 +16,6 @@ export const basetenIntentRequestSchema = z.object({
 export type AIIntentRequest = z.infer<typeof basetenIntentRequestSchema>;
 const geminiModel = process.env.GEMINI_MODEL?.trim() || "gemini-3.5-flash-lite";
 const museModel = process.env.BASETEN_MODEL?.trim() || "meta-models/muse-spark-open-1026";
-const metaModel = process.env.META_MODEL?.trim() || "muse-spark-open";
 const metaApiBaseUrl = (process.env.META_API_BASE_URL?.trim() || "https://api.llama.com/v1").replace(/\/$/, "");
 const modelRequestTimeoutMs = 15000;
 
@@ -74,6 +73,7 @@ export async function inferBasetenIntent(input: AIIntentRequest): Promise<z.infe
 
 export async function inferMetaIntent(input: AIIntentRequest): Promise<z.infer<typeof intentSchema>> {
   const apiKey = process.env.META_API_KEY?.trim();
+  const metaModel = process.env.META_MODEL?.trim() || "muse-spark-open-1026";
   if (!apiKey) throw new ServiceError("Meta Model API is not configured. The local engine is active.", 503);
   try {
     const response = await fetch(`${metaApiBaseUrl}/chat/completions`, {
@@ -144,6 +144,11 @@ function enabled(value: string | undefined): boolean {
 }
 
 export async function inferConfiguredIntent(input: AIIntentRequest): Promise<{ intent: z.infer<typeof intentSchema>; provider: "gemini" | "muse" | "meta" }> {
+  if (enabled(process.env.META_HACKATHON_MODE)) {
+    if (enabled(process.env.META_ENABLED) && process.env.META_API_KEY?.trim()) return { intent: await inferMetaIntent(input), provider: "meta" };
+    if (enabled(process.env.BASETEN_ENABLED) && process.env.BASETEN_API_KEY?.trim()) return { intent: await inferBasetenIntent(input), provider: "muse" };
+    throw new ServiceError("No Meta AI provider is enabled. The local engine is active.", 503);
+  }
   if (enabled(process.env.META_ENABLED) && process.env.META_API_KEY?.trim()) return { intent: await inferMetaIntent(input), provider: "meta" };
   if (enabled(process.env.GEMINI_ENABLED) && process.env.GEMINI_API_KEY?.trim()) return { intent: await inferGeminiIntent(input), provider: "gemini" };
   if (enabled(process.env.BASETEN_ENABLED) && process.env.BASETEN_API_KEY?.trim()) return { intent: await inferBasetenIntent(input), provider: "muse" };

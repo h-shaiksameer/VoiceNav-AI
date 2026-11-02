@@ -1,6 +1,6 @@
 import { lastOptionIndex } from "@/navigation/commands";
 
-export type RecognitionError = "permission" | "unsupported" | "network" | "no-speech" | "audio-track" | "audio-capture" | "language" | "busy" | "unknown";
+export type RecognitionError = "permission" | "unsupported" | "network" | "no-speech" | "audio-track" | "audio-capture" | "language" | "busy" | "mms-service" | "mms-audio" | "unknown";
 export const VOICE_SEND_PHRASE = "Send";
 export const HINDI_VOICE_SEND_PHRASE = "सेंड";
 export const VOICE_INTERRUPT_PHRASE = "Hey Navigator";
@@ -218,8 +218,102 @@ export const recognitionMessages: Record<RecognitionError, string> = {
   "audio-capture": "The browser could not access a working microphone. Check the selected input device and Windows microphone access, then try again.",
   language: "The browser speech service does not support the selected recognition language. Try another language or type your question.",
   busy: "Speech recognition is already running. Stop voice input before starting the microphone again.",
+  "mms-service": "Meta MMS speech recognition is unavailable. Start the local MMS service or turn Meta MMS off.",
+  "mms-audio": "The recorded audio could not be decoded by Meta MMS. Try again or use text input.",
   unknown: "Voice input could not start. Check your microphone or type your question.",
 };
+
+export type MmsRecognitionController = { stop: () => void; finish: () => void };
+
+export function startMmsRecognition(callbacks: {
+  onStart?: () => void;
+  onTranscript?: (text: string, final: boolean) => void;
+  onError: (reason: RecognitionError) => void;
+  onEnd: () => void;
+  onComplete: (text: string) => void;
+  maxDurationMs?: number;
+}): MmsRecognitionController {
+  let ended = false;
+  let finished = false;
+  let recorder: MediaRecorder | null = null;
+  let stream: MediaStream | null = null;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const chunks: Blob[] = [];
+
+  function releaseStream() {
+    stream?.getTracks().forEach((track) => track.stop());
+    stream = null;
+  }
+
+  function endWithError(reason: RecognitionError) {
+    if (ended) return;
+    ended = true;
+    clearTimeout(timeout);
+    releaseStream();
+    callbacks.onError(reason);
+    callbacks.onEnd();
+  }
+
+  async function transcribe() {
+    if (ended || !finished) return;
+    try {
+      const body = new FormData();
+      body.append("audio", new Blob(chunks, { type: recorder?.mimeType || "audio/webm" }), "voice-audio.webm");
+      const response = await fetch("/api/voice/transcribe", { method: "POST", body, signal: AbortSignal.timeout((callbacks.maxDurationMs ?? 90_000) + 30_000) });
+      const payload = await response.json().catch(() => null) as { text?: unknown; error?: unknown } | null;
+      if (!response.ok) {
+        callbacks.onError(response.status === 400 ? "mms-audio" : "mms-service");
+        return;
+      }
+      const text = typeof payload?.text === "string" ? payload.text.trim() : "";
+      if (!text) { callbacks.onError("mms-audio"); return; }
+      callbacks.onTranscript?.(text, true);
+      callbacks.onComplete(text);
+    } catch (error) {
+      callbacks.onError(error instanceof DOMException && error.name === "TimeoutError" ? "mms-service" : "mms-service");
+    } finally {
+      if (!ended) { ended = true; callbacks.onEnd(); }
+    }
+  }
+
+  function finish() {
+    if (ended || finished) return;
+    finished = true;
+    clearTimeout(timeout);
+    if (!recorder || recorder.state === "inactive") { endWithError("mms-audio"); return; }
+    recorder.stop();
+  }
+
+  function stop() {
+    if (ended) return;
+    ended = true;
+    clearTimeout(timeout);
+    if (recorder && recorder.state !== "inactive") recorder.stop();
+    releaseStream();
+  }
+
+  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+    endWithError("unsupported");
+    return { stop, finish };
+  }
+
+  void navigator.mediaDevices.getUserMedia({ audio: true }).then((captured) => {
+    if (ended) { captured.getTracks().forEach((track) => track.stop()); return; }
+    stream = captured;
+    const mimeType = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg", "audio/wav"].find((candidate) => MediaRecorder.isTypeSupported(candidate)) || "";
+    try { recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream); }
+    catch { endWithError("unsupported"); return; }
+    recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+    recorder.onerror = () => endWithError("mms-audio");
+    recorder.onstop = () => { releaseStream(); if (finished && !ended) void transcribe(); };
+    recorder.start();
+    callbacks.onStart?.();
+    timeout = setTimeout(finish, Math.min(90_000, callbacks.maxDurationMs ?? 90_000));
+  }).catch((error: unknown) => {
+    endWithError(error instanceof DOMException && ["NotAllowedError", "SecurityError"].includes(error.name) ? "permission" : "audio-capture");
+  });
+  return { stop, finish };
+}
 
 export function startVoiceInterruption(callbacks: {
   spokenText?: string;

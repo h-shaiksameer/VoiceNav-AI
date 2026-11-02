@@ -19,6 +19,7 @@ It is designed as a calmer, more explainable alternative to command-heavy naviga
   - `Find restaurants near me.`
   - `How much longer will it take?`
 - Supports English text and browser speech, with experimental Hindi/Hinglish text handling.
+- Supports optional local Meta MMS-1B-All speech-to-text through a persistent Python service.
 - Reads assistant responses aloud and continues playback when the site is moved to a background tab, subject to browser audio policy.
 - Provides a separate Map Voice mode for zoom, pan, center, and reset commands.
 
@@ -41,7 +42,13 @@ The AI provider is an intent classifier. It does not receive navigation authorit
 User text or speech
         |
         v
-Server-only Gemini or Muse intent classifier
+Browser speech recognition or optional local Meta MMS speech-to-text
+        |
+        v
+Recognized text
+        |
+        v
+Server-only Meta, Gemini, or Muse intent classifier
         |
         v
 Validated intent schema and local safety rules
@@ -130,6 +137,63 @@ Map Voice:
 - Map commands must remain in Map Voice; normal Nova does not route them through destination processing.
 
 If speech recognition is unavailable, text input remains usable. Hindi speech and playback are experimental and depend on browser/device support.
+
+## Optional Meta MMS Speech-to-Text
+
+VoiceNav can use Meta's open-source `facebook/mms-1b-all` model as a local speech-to-text engine. MMS is disabled by default. When enabled, the browser records one voice request, the Next.js server proxies it to a persistent Python service on `127.0.0.1`, and the recognized text continues through the existing ConversationEngine and navigation safety pipeline.
+
+The existing browser `SpeechRecognition` path remains the default when `META_MMS_ENABLED=false`. MMS does not change intent processing, route calculation, map control, navigation state, or spoken replies. MMS does not provide interim transcripts; use the **Send** button to finish a recording, or the cancel/stop controls to discard it.
+
+### MMS Configuration
+
+These variables are server-side/local-service settings. Do not expose them through `NEXT_PUBLIC_*`, commit credentials, or place model files in the repository:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `META_MMS_ENABLED` | `false` | Selects MMS instead of browser speech recognition |
+| `META_MMS_SERVICE_URL` | `http://127.0.0.1:8001` | Private Python service URL |
+| `META_MMS_MODEL_ID` | `facebook/mms-1b-all` | Hugging Face model identifier |
+| `META_MMS_MODEL_PATH` | empty | Optional local snapshot directory; empty uses the Hugging Face cache/model ID |
+| `META_MMS_DEVICE` | `cpu` | Current supported inference device |
+| `META_MMS_LANGUAGE` | `eng` | Reported MMS language code |
+| `META_MMS_MAX_AUDIO_BYTES` | `15728640` | Maximum uploaded audio size |
+| `META_MMS_MAX_AUDIO_SECONDS` | `90` | Maximum decoded recording duration |
+| `META_MMS_REQUEST_TIMEOUT_MS` | `120000` | Next.js-to-Python request timeout |
+
+The Python service also reads the repository `.env` file when started from this project, while explicitly exported process variables take precedence. `META_MMS_MODEL_PATH` must point to a directory containing the downloaded model files on the machine running the Python service; no personal Windows path is hardcoded.
+
+### Windows Service Setup
+
+From the repository root, create a Python environment and install the isolated service dependencies:
+
+```powershell
+py -3.11 -m venv services/mms/.venv
+services/mms/.venv/Scripts/Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r services/mms/requirements.txt
+```
+
+Set `META_MMS_MODEL_PATH` in `.env` to the local model snapshot if it is not already available through the Hugging Face cache. Then start the persistent service from the repository root:
+
+```powershell
+services/mms/.venv/Scripts/python.exe -m uvicorn services.mms.main:app --host 127.0.0.1 --port 8001
+```
+
+Check readiness locally at `http://127.0.0.1:8001/health`. The service loads the model once at startup, logs initialization and inference duration, serializes CPU inference, and returns `503` until the model is ready. Stop it with `Ctrl+C`.
+
+In a second terminal, start VoiceNav normally:
+
+```powershell
+npm run dev
+```
+
+Set `META_MMS_ENABLED=true` and restart Next.js to select MMS. Set it back to `false` and restart to restore the existing browser recognition path. If MMS is enabled but the service is unavailable or audio is invalid, VoiceNav reports an error and does not silently substitute another speech or AI provider.
+
+### Meta Attribution And License
+
+This integration uses Meta's `facebook/mms-1b-all` model from Hugging Face. MMS-1B-All is distributed under the **CC-BY-NC 4.0** license. Review the license and non-commercial terms before using this model outside the hackathon or in any commercial deployment. The model weights, Hugging Face cache, virtual environment, and temporary audio files must remain outside version control.
+
+For the Meta Global AI Developer Hackathon runtime, set `META_HACKATHON_MODE=on`. That server-only guard prevents Gemini or other non-Meta intent models from being selected; the allowed optional intent paths are first-party Meta or Baseten-hosted Meta Muse, while MMS supplies local speech-to-text.
 
 ## Session Workspaces
 
@@ -226,6 +290,7 @@ This boundary is intentional: the model can understand varied language, while lo
 | Gemini | Optional server-side intent classification |
 | Meta Model API | Optional first-party Meta intent classification, including configurable Muse models |
 | Baseten Muse Spark Open | Optional alternate intent classification |
+| Local Meta MMS service | Optional persistent local speech-to-text, disabled by default |
 
 These are public or third-party services with rate limits and no guaranteed uptime. The application uses bounded requests, caching, validation, and error handling, but it does not provide production-scale global rate limiting across serverless instances.
 
@@ -244,6 +309,7 @@ Implemented:
 - Read-only alternative route previews.
 - Multi-stop route optimization.
 - English text and browser voice workflows.
+- Optional local Meta MMS speech-to-text with the existing browser fallback.
 - Optional Meta, Gemini, and Baseten Muse classification with local fallback.
 
 Not implemented:

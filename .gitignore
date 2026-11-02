@@ -9,3 +9,9 @@ next-env.d.ts
 !.env.example
 *.log
 .DS_Store
+services/mms/__pycache__/
+services/mms/.venv/
+services/mms/venv/
+services/mms/*.wav
+services/mms/*.webm
+services/mms/*.ogg

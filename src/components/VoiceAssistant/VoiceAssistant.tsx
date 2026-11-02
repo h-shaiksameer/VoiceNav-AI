@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { AudioLines, Check, ChevronDown, ChevronUp, Layers, LoaderCircle, Mic, MicOff, Send, Square, Volume2, X } from "lucide-react";
 import type { ConversationEngine } from "@/conversation/ConversationEngine";
 import { lastOptionIndex } from "@/navigation/commands";
-import { HINDI_VOICE_SEND_PHRASE, prepareSpokenText, recognitionMessages, recognitionSupported, speakResponse, startMicrophoneInterruption, startRecognition, VOICE_SEND_PHRASE } from "@/services/voice/browserVoice";
+import { HINDI_VOICE_SEND_PHRASE, prepareSpokenText, recognitionMessages, recognitionSupported, speakResponse, startMicrophoneInterruption, startMmsRecognition, startRecognition, VOICE_SEND_PHRASE, type RecognitionError } from "@/services/voice/browserVoice";
 
 type VoiceState = "idle" | "listening" | "processing" | "responding" | "error";
 const subscribeCapabilities = () => () => {};
@@ -24,7 +24,7 @@ function releaseMicrophone(owner: symbol): void {
 
 export function VoiceAssistant({ engine, blocked, onBusyChange, active = true }: { engine: ConversationEngine; blocked: boolean; onBusyChange: (busy: boolean) => void; active?: boolean }) {
   const context = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
-  const voiceSupported = useSyncExternalStore(subscribeCapabilities, recognitionSupported, serverRecognition);
+  const browserVoiceSupported = useSyncExternalStore(subscribeCapabilities, recognitionSupported, serverRecognition);
   const [state, setState] = useState<VoiceState>("idle");
   const [input, setInput] = useState("");
   const [error, setError] = useState("");
@@ -36,8 +36,11 @@ export function VoiceAssistant({ engine, blocked, onBusyChange, active = true }:
   const [interruptionReady, setInterruptionReady] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [mobileAssistantHidden, setMobileAssistantHidden] = useState(true);
+  const [mmsEnabled, setMmsEnabled] = useState(false);
+  const voiceSupported = browserVoiceSupported || mmsEnabled;
   const uiControlHost = active && typeof document !== "undefined" ? document.getElementById("ui-control-slot") : null;
   const abortListening = useRef<(() => void) | null>(null);
+  const mmsFinish = useRef<(() => void) | null>(null);
   const stopSpeaking = useRef<(() => void) | null>(null);
   const stopInterruption = useRef<(() => void) | null>(null);
   const interruptionEnabled = useRef(false);
@@ -88,6 +91,13 @@ export function VoiceAssistant({ engine, blocked, onBusyChange, active = true }:
       releaseMicrophone(microphoneIdentity);
     };
   }, [microphoneIdentity]);
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/voice/config", { cache: "no-store" }).then((response) => response.ok ? response.json() as Promise<{ mmsEnabled?: unknown }> : null).then((config) => {
+      if (active) setMmsEnabled(config?.mmsEnabled === true);
+    }).catch(() => { if (active) setMmsEnabled(false); });
+    return () => { active = false; };
+  }, []);
   useEffect(() => { if (messages.current) messages.current.scrollTop = messages.current.scrollHeight; }, [context.messages, collapsed]);
   useEffect(() => {
     function stopHiddenRecording() {
@@ -123,6 +133,7 @@ export function VoiceAssistant({ engine, blocked, onBusyChange, active = true }:
     setInterruptionReady(false);
     stopInterruption.current?.(); stopInterruption.current = null;
     abortListening.current?.(); abortListening.current = null;
+    mmsFinish.current = null;
     if (stopSpeaking.current) playbackStoppedAt.current = Date.now();
     stopSpeaking.current?.(); stopSpeaking.current = null;
     setState("idle");
@@ -429,63 +440,75 @@ export function VoiceAssistant({ engine, blocked, onBusyChange, active = true }:
     stopSpeaking.current?.(); stopSpeaking.current = null;
     setError(""); setState("listening"); onBusyChange(true);
     beforeListening.current = followup ? "" : input.trim();
-    abortListening.current = startRecognition({
-      language: engine.getSnapshot().language === "hi" ? "hi-IN" : "en-IN",
-      startDelayMs: uiControlMode.current ? 250 : Date.now() - playbackStoppedAt.current < 400 ? 400 : 0,
-      initialTranscript: beforeListening.current,
-      onTranscript: (text, final) => {
-        liveDraft.current = text;
-        setInput(text.slice(0, 500));
-        if (uiControlMode.current) {
-          setMapVoiceTranscript(text.slice(0, 240));
-          if (final && text.trim()) {
-            if (mapAutoSubmitTimer.current) clearTimeout(mapAutoSubmitTimer.current);
-            mapAutoSubmitTimer.current = setTimeout(() => {
-              mapAutoSubmitTimer.current = null;
-              abortListening.current?.();
-              abortListening.current = null;
-              void submitUiControl(text);
-            }, 1000);
-          }
-        }
-        if (engine.getSnapshot().pendingLocationChoices.length && final) {
-          if (optionAutoSubmit.current) clearTimeout(optionAutoSubmit.current);
-          optionAutoSubmit.current = setTimeout(() => {
-            optionAutoSubmit.current = null;
+    const onTranscript = (text: string, final: boolean) => {
+      liveDraft.current = text;
+      setInput(text.slice(0, 500));
+      if (uiControlMode.current) {
+        setMapVoiceTranscript(text.slice(0, 240));
+        if (final && text.trim()) {
+          if (mapAutoSubmitTimer.current) clearTimeout(mapAutoSubmitTimer.current);
+          mapAutoSubmitTimer.current = setTimeout(() => {
+            mapAutoSubmitTimer.current = null;
             abortListening.current?.();
             abortListening.current = null;
-            void submit(text, true);
-            }, 2000);
+            void submitUiControl(text);
+          }, 1000);
         }
-      },
-      completeOnFinal: false,
-      onComplete: (text) => { if (uiControlMode.current) void submitUiControl(text); else void submit(text, true); },
-      onDiscard: () => { liveDraft.current = ""; beforeListening.current = ""; setInput(""); if (uiControlMode.current) setMapVoiceTranscript(""); },
-      keepAlive: uiControlMode.current,
-      maxDurationMs: followup ? 15000 : 90000,
-      onError: (reason) => {
-        releaseMicrophone(microphoneIdentity);
-        voiceConversation.current = false;
-        abortListening.current = null;
-        if (uiControlMode.current && !["permission", "unsupported", "language"].includes(reason) && !document.hidden) {
-          setError(""); setState("idle"); onBusyChange(false);
-          uiRestartTimer.current = setTimeout(() => { uiRestartTimer.current = null; if (uiControlMode.current && !requestActive.current && !document.hidden) listen(true); }, 250);
-          return;
-        }
-        if (uiControlMode.current) { uiControlMode.current = false; setUiControlActive(false); }
-        setError(recognitionMessages[reason]); setState("error"); onBusyChange(false);
-      },
-      onEnd: () => {
-        releaseMicrophone(microphoneIdentity);
-        voiceConversation.current = false;
-        abortListening.current = null;
-        setState((current) => current === "listening" ? "idle" : current);
-        onBusyChange(false);
-        if (uiControlMode.current && !document.hidden) {
-          uiRestartTimer.current = setTimeout(() => { uiRestartTimer.current = null; if (uiControlMode.current && !requestActive.current && !document.hidden) listen(true); }, 250);
-        }
-      },
-    });
+      }
+      if (engine.getSnapshot().pendingLocationChoices.length && final) {
+        if (optionAutoSubmit.current) clearTimeout(optionAutoSubmit.current);
+        optionAutoSubmit.current = setTimeout(() => {
+          optionAutoSubmit.current = null;
+          abortListening.current?.();
+          abortListening.current = null;
+          void submit(text, true);
+        }, 2000);
+      }
+    };
+    const onComplete = (text: string) => { if (uiControlMode.current) void submitUiControl(text); else void submit(text, true); };
+    const onError = (reason: RecognitionError) => {
+      releaseMicrophone(microphoneIdentity);
+      voiceConversation.current = false;
+      abortListening.current = null;
+      mmsFinish.current = null;
+      if (uiControlMode.current && !["permission", "unsupported", "language", "mms-service", "mms-audio"].includes(reason) && !document.hidden) {
+        setError(""); setState("idle"); onBusyChange(false);
+        uiRestartTimer.current = setTimeout(() => { uiRestartTimer.current = null; if (uiControlMode.current && !requestActive.current && !document.hidden) listen(true); }, 250);
+        return;
+      }
+      if (uiControlMode.current) { uiControlMode.current = false; setUiControlActive(false); }
+      setError(recognitionMessages[reason]); setState("error"); onBusyChange(false);
+    };
+    const onEnd = () => {
+      releaseMicrophone(microphoneIdentity);
+      voiceConversation.current = false;
+      abortListening.current = null;
+      mmsFinish.current = null;
+      setState((current) => current === "listening" ? "idle" : current);
+      onBusyChange(false);
+      if (uiControlMode.current && !document.hidden) {
+        uiRestartTimer.current = setTimeout(() => { uiRestartTimer.current = null; if (uiControlMode.current && !requestActive.current && !document.hidden) listen(true); }, 250);
+      }
+    };
+    if (mmsEnabled && !interruptionEnabled.current) {
+      const controller = startMmsRecognition({ onTranscript, onComplete, onError, onEnd, maxDurationMs: followup ? 15000 : 90000 });
+      abortListening.current = controller.stop;
+      mmsFinish.current = controller.finish;
+    } else {
+      abortListening.current = startRecognition({
+        language: engine.getSnapshot().language === "hi" ? "hi-IN" : "en-IN",
+        startDelayMs: uiControlMode.current ? 250 : Date.now() - playbackStoppedAt.current < 400 ? 400 : 0,
+        initialTranscript: beforeListening.current,
+        onTranscript,
+        completeOnFinal: false,
+        onComplete,
+        onDiscard: () => { liveDraft.current = ""; beforeListening.current = ""; setInput(""); if (uiControlMode.current) setMapVoiceTranscript(""); },
+        keepAlive: uiControlMode.current,
+        maxDurationMs: followup ? 15000 : 90000,
+        onError,
+        onEnd,
+      });
+    }
   }
 
   function setContinuousListening(enabled: boolean) {
@@ -546,12 +569,12 @@ export function VoiceAssistant({ engine, blocked, onBusyChange, active = true }:
       {context.pendingDestination && <div className="confirmation"><span>{context.pendingOrigin ? "New route" : "Destination change"}</span>{context.pendingOrigin && <p>From {context.pendingOrigin.name}</p>}<strong>{context.pendingDestination.name}</strong><div><button className="primary-button" disabled={blocked || processing} onClick={() => void run(() => engine.confirm())}><Check size={14} />{context.pendingOrigin ? "Confirm route" : "Confirm destination"}</button><button className="secondary-button" disabled={blocked || processing} onClick={() => engine.cancel()}><X size={14} />Cancel</button></div></div>}
       {error && <p className="voice-error" role="alert">{error}</p>}
       {!voiceSupported && <p className="voice-unavailable"><MicOff size={12} />Voice input unavailable. Text input is ready.</p>}
-      <form className="assistant-form" onSubmit={(event) => { event.preventDefault(); void submit(input); }}>
+      <form className="assistant-form" onSubmit={(event) => { event.preventDefault(); if (mmsFinish.current) { mmsFinish.current(); return; } void submit(input); }}>
         <label className="sr-only" htmlFor="assistant-message">Message the navigation assistant</label>
         <textarea id="assistant-message" lang={context.language === "hi" ? "hi" : "en"} placeholder={context.language === "hi" ? "अपनी मंज़िल या रास्ते के बारे में पूछिए…" : "Ask about your journey…"} rows={2} maxLength={500} value={input} onChange={(event) => { liveDraft.current = event.target.value; if (state === "listening") stopVoice(); setInput(event.target.value); scheduleTypedOption(event.target.value); }} disabled={processing || blocked || uiControlActive} autoComplete="off" onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(input); } }} />
         <button type="button" className={`mic-button ${state === "listening" && !uiControlActive ? "active" : ""}`} title={state === "listening" ? "Stop recording and keep draft" : state === "responding" ? "Interrupt reply and listen" : "Start voice input"} aria-label={state === "listening" ? "Stop recording and keep draft" : state === "responding" ? "Interrupt reply and listen" : "Start voice input"} aria-pressed={state === "listening"} onClick={() => listen()} disabled={!voiceSupported || state === "processing" || blocked || uiControlActive}>{state === "listening" ? <Square size={16} /> : <Mic size={18} />}</button>
         {state === "listening" && <button className="icon-button" type="button" title="Cancel voice draft" aria-label="Cancel voice draft" onClick={() => { if (interruptionEnabled.current) { stopInterruption.current?.(); stopInterruption.current = null; microphoneReady.current = false; liveDraft.current = ""; beforeListening.current = ""; setInput(""); armInterruption(); } else { stopVoice(); liveDraft.current = beforeListening.current; setInput(beforeListening.current); } }}><X size={15} /></button>}
-        {state === "responding" ? <button className="icon-button" type="button" title="Stop speaking" aria-label="Stop speaking" onClick={stopVoice}><Square size={16} /></button> : <button className="send-button" type="submit" title={state === "listening" ? "Finish recording and send" : "Send message"} aria-label={state === "listening" ? "Finish recording and send" : "Send message"} disabled={!input.trim() || processing || blocked || uiControlActive}>{state === "processing" ? <LoaderCircle size={17} className="spin" /> : <Send size={17} />}</button>}
+        {state === "responding" ? <button className="icon-button" type="button" title="Stop speaking" aria-label="Stop speaking" onClick={stopVoice}><Square size={16} /></button> : <button className="send-button" type="submit" title={state === "listening" ? "Finish recording and send" : "Send message"} aria-label={state === "listening" ? "Finish recording and send" : "Send message"} disabled={(!input.trim() && !(state === "listening" && mmsEnabled)) || processing || blocked || uiControlActive}>{state === "processing" ? <LoaderCircle size={17} className="spin" /> : <Send size={17} />}</button>}
       </form>
       <footer className="assistant-footer"><label htmlFor="assistant-language">Language<select id="assistant-language" value={context.language} disabled={blocked || state !== "idle" && state !== "error"} onChange={(event) => { engine.setLanguage(event.target.value === "hi" ? "hi" : "en"); stopVoice(); }}><option value="en">English</option><option value="hi">हिन्दी / Deccani</option></select></label><label title="Spoken replies"><Volume2 size={12} /><span>Spoken replies</span><input type="checkbox" checked={spoken} onChange={(event) => { const enabled = event.target.checked; setSpoken(enabled); speechEnabled.current = enabled; if (!enabled && replyActive.current) { playbackStoppedAt.current = Date.now(); stopSpeaking.current?.(); stopSpeaking.current = null; finishReply(); } }} /></label></footer>
       <footer className="assistant-footer"><label title={`Keep listening between replies and interrupt without a wake phrase. Finish with ${sendPhrase} or Submit to submit, or Discard to clear the draft. The microphone and playback buttons do not disable this setting. Uncheck to stop automatic listening; hiding the page or collapsing the panel also stops it. Uses an echo-cancelled microphone; browser support varies.`}><Mic size={12} /><span>Allow interruptions</span><input type="checkbox" checked={allowInterruptions} disabled={!voiceSupported} onChange={(event) => setContinuousListening(event.target.checked)} /></label></footer>
